@@ -12,7 +12,7 @@ export class UpdateDoctorDto {
   @ApiProperty({ example: 'doctor@example.com', description: 'Valid email address' })
   @Transform(({ value }) => value?.toLowerCase().trim())
   @IsEmail({}, { 
-    message: 'Invalid email format. Email must contain @ and domain (e.g., .com, .org). Example: doctor@example.com'
+    message: 'Invalid email format. Email must contain @ and domain (e.g., .com, .org)'
   })
   @IsOptional()
   @Matches(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/, {
@@ -28,4 +28,12 @@ export class UpdateDoctorDto {
     message: 'Password must contain at least one uppercase letter, one lowercase letter, one number and one special character (@$!%*?&)'
   })
   password?: string;
+
+  @ApiProperty({ example: '9876543210', description: 'Valid 10-digit mobile number' })
+  @IsString({ message: 'Mobile number must be text' })
+  @IsOptional()
+  @Matches(/^[6-9]\d{9}$/, {
+    message: 'Mobile number must be a valid 10-digit number starting with 6-9'
+  })
+  mobileNo?: string;
 }

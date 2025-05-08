@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export enum UserType {
   DOCTOR = 'doctor',
@@ -8,6 +8,8 @@ export enum UserType {
 
 @Schema({ timestamps: true })
 export class User extends Document {
+  // The _id will still be available and typed as Types.ObjectId
+
   @Prop({ required: true })
   name: string;
 
@@ -23,11 +25,23 @@ export class User extends Document {
   @Prop({ required: true })
   hospitalId: string;
 
-  @Prop()
-  mobileNo?: string;
+  @Prop({ required: true, match: /^[6-9]\d{9}$/ })
+  mobileNo: string;
 
   @Prop()
   dob?: Date;
+
+  @Prop()
+  refreshToken?: string;
+
+  @Prop({ default: false })
+  isVerified: boolean;
+
+  @Prop({ default: true })
+  isActive: boolean;
+
+  @Prop()
+  lastLogin?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

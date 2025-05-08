@@ -28,4 +28,12 @@ export class CreateDoctorDto {
     message: 'Password must contain at least one uppercase letter, one lowercase letter, one number and one special character (@$!%*?&)'
   })
   password: string;
+
+  @ApiProperty({ example: '9876543210', description: 'Valid 10-digit mobile number' })
+  @IsString({ message: 'Mobile number must be text' })
+  @IsNotEmpty({ message: 'Mobile number cannot be empty' })
+  @Matches(/^[6-9]\d{9}$/, {
+    message: 'Mobile number must be a valid 10-digit number starting with 6-9'
+  })
+  mobileNo: string;
 }

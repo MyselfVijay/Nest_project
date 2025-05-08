@@ -1,5 +1,5 @@
-import { IsEmail, IsString, MinLength, IsDate, Matches, IsNotEmpty } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsEmail, IsString, MinLength, Matches, IsNotEmpty, IsDateString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreatePatientDto {
@@ -38,8 +38,9 @@ export class CreatePatientDto {
   mobileNo: string;
 
   @ApiProperty({ example: '1990-01-01', description: 'Date of birth in YYYY-MM-DD format' })
-  @Type(() => Date)
-  @IsDate({ message: 'Invalid date format. Please use YYYY-MM-DD format' })
   @IsNotEmpty({ message: 'Date of birth cannot be empty' })
-  dob: Date;
+  @IsDateString({}, { 
+    message: 'Invalid date format. Please use YYYY-MM-DD format (e.g., 1990-01-01)'
+  })
+  dob: string;
 }

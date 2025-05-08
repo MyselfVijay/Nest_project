@@ -1,5 +1,5 @@
-import { IsEmail, IsString, MinLength, IsDate, Matches, IsOptional } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsEmail, IsString, MinLength, Matches, IsOptional, IsDateString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdatePatientDto {
@@ -12,7 +12,7 @@ export class UpdatePatientDto {
   @ApiProperty({ example: 'patient@example.com', description: 'Valid email address' })
   @Transform(({ value }) => value?.toLowerCase().trim())
   @IsEmail({}, { 
-    message: 'Invalid email format. Email must contain @ and domain (e.g., .com, .org). Example: patient@example.com'
+    message: 'Invalid email format. Email must contain @ and domain (e.g., .com, .org)'
   })
   @IsOptional()
   @Matches(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/, {
@@ -29,17 +29,18 @@ export class UpdatePatientDto {
   })
   password?: string;
 
-  @ApiProperty({ example: '1234567890', description: '10-digit mobile number' })
+  @ApiProperty({ example: '9876543210', description: 'Valid 10-digit mobile number' })
   @IsString({ message: 'Mobile number must be text' })
   @IsOptional()
-  @Matches(/^[6-9]\d{9}$/, { 
-    message: 'Mobile number must be exactly 10 digits starting with 6-9. Example: 9876543210'
+  @Matches(/^[6-9]\d{9}$/, {
+    message: 'Mobile number must be a valid 10-digit number starting with 6-9'
   })
   mobileNo?: string;
 
   @ApiProperty({ example: '1990-01-01', description: 'Date of birth in YYYY-MM-DD format' })
-  @Type(() => Date)
-  @IsDate({ message: 'Invalid date format. Please use YYYY-MM-DD format' })
   @IsOptional()
-  dob?: Date;
+  @IsDateString({}, { 
+    message: 'Invalid date format. Please use YYYY-MM-DD format (e.g., 1990-01-01)'
+  })
+  dob?: string;
 }
