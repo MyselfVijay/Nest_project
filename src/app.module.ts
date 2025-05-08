@@ -1,16 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { UsersModule } from './UsersModule';
-import { AuthService } from './users/auth.service';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { PatientModule } from './patient/patient.module';
+import { DoctorModule } from './doctor/doctor.module';
 
 @Module({
   imports: [
-    MongooseModule.forRoot('mongodb+srv://myselfvijay033:Vantan%5Fda%5F420@cluster0.teza9si.mongodb.net/nestdb'),
-    UsersModule,
+    MongooseModule.forRoot('mongodb+srv://myselfvijay033:Vantan_da_420@cluster0.teza9si.mongodb.net/nestdb'),
+    PatientModule,
+    DoctorModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, AuthService],
 })
 export class AppModule {}
