@@ -1,21 +1,20 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
-import { AuthController } from './auth.controller';
+import { JwtModule } from '@nestjs/jwt';
+import { User, UserSchema } from '../schemas/user.schema';
+import { DoctorController } from './doctor.controller';
 import { AuthService } from './auth.service';
-import { User, UserSchema } from '../users/user.entity';
 
 @Module({
   imports: [
+    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     JwtModule.register({
-      global: true,
-      secret: 'your_jwt_secret', // Use environment variable in production
-      signOptions: { expiresIn: '1h' },
+      secret: 'your_jwt_secret',
+      signOptions: { expiresIn: '15m' },
     }),
-    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }])
   ],
-  controllers: [AuthController],
+  controllers: [DoctorController],
   providers: [AuthService],
-  exports: [AuthService],
+  exports: [AuthService]  // Export AuthService to make it available in other modules
 })
 export class AuthModule {}

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Types } from 'mongoose';
 
@@ -6,42 +6,33 @@ import { Types } from 'mongoose';
 export class AuthService {
   constructor(private jwtService: JwtService) {}
 
-  async generateTokens(userId: Types.ObjectId, hospitalId: string, userType: string) {
+  async generateTokens(userId: Types.ObjectId | string, hospitalId: string, userType: string) {
     const payload = {
       sub: userId.toString(),
       hospitalId,
-      userType
+      userType,
+      iat: Math.floor(Date.now() / 1000)
     };
 
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        expiresIn: '15m',
-        secret: 'your_access_token_secret'
-      }),
-      this.jwtService.signAsync(payload, {
-        expiresIn: '7d',
-        secret: 'your_refresh_token_secret'
-      })
-    ]);
+    const accessToken = this.jwtService.sign(payload);
+    const decodedToken = this.jwtService.decode(accessToken);
 
     return {
       accessToken,
-      refreshToken
+      decodedToken
     };
   }
 
   async validateToken(token: string) {
     try {
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: 'your_access_token_secret'
-      });
-      return {
-        userId: new Types.ObjectId(payload.sub),
-        hospitalId: payload.hospitalId,
-        userType: payload.userType
-      };
-    } catch {
-      return null;
+      const payload = await this.jwtService.verifyAsync(token);
+      return payload;
+    } catch (error) {
+      throw new UnauthorizedException('Invalid token');
     }
+  }
+
+  decodeToken(token: string) {
+    return this.jwtService.decode(token);
   }
 }

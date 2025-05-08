@@ -38,8 +38,10 @@ export class DoctorService {
       return {
         message: 'Doctor signup successful',
         data: {
+          id: doctor._id,
           name: doctor.name,
-          email: doctor.email
+          email: doctor.email,
+          mobileNo: doctor.mobileNo
         }
       };
     } catch (error) {

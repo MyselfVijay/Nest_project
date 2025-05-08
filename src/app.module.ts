@@ -1,15 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { PatientModule } from './patient/patient.module';
-import { DoctorModule } from './doctor/doctor.module';
 import { AuthModule } from './auth/auth.module';
+import { PatientModule } from './patient/patient.module';
 
 @Module({
   imports: [
-    MongooseModule.forRoot('mongodb+srv://myselfvijay033:Vantan_da_420@cluster0.teza9si.mongodb.net/nestdb'),
-    PatientModule,
-    DoctorModule,
-    AuthModule, // Add this line
+    MongooseModule.forRoot('mongodb://localhost:27017/hospital_db'),
+    AuthModule,
+    PatientModule
   ],
 })
 export class AppModule {}
