@@ -1,6 +1,6 @@
 import { Controller, Post, Body, HttpStatus, HttpException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../schemas/user.schema';
 import { RegisterDto } from './dto/register.dto';
 import * as bcrypt from 'bcrypt';
@@ -36,12 +36,12 @@ export class DoctorController {
       lastLogin: null
     });
 
-    // Save doctor
-    const savedDoctor = await newDoctor.save();
+    // Save doctor and ensure proper typing
+    const savedDoctor = (await newDoctor.save()) as UserDocument & { _id: Types.ObjectId };
 
     // Generate tokens
     const tokens = await this.authService.generateTokens(
-      savedDoctor._id, // Pass ObjectId directly
+      savedDoctor._id.toString(),
       savedDoctor.hospitalId,
       'doctor'
     );

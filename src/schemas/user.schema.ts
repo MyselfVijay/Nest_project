@@ -5,8 +5,6 @@ export type UserDocument = User & Document;
 
 @Schema()
 export class User {
-  _id: Types.ObjectId;
-
   @Prop({ required: true })
   name: string;
 
@@ -25,7 +23,7 @@ export class User {
   @Prop({ required: true, enum: ['doctor', 'patient'] })
   userType: string;
 
-  @Prop({ required: true, default: Date.now })
+  @Prop({ default: Date.now })
   createdAt: Date;
 
   @Prop()

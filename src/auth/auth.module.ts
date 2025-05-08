@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { User, UserSchema } from '../schemas/user.schema';
-import { DoctorController } from './doctor.controller';
+import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { DoctorController } from './doctor.controller';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -13,8 +15,8 @@ import { AuthService } from './auth.service';
       signOptions: { expiresIn: '15m' },
     }),
   ],
-  controllers: [DoctorController],
-  providers: [AuthService],
-  exports: [AuthService]  // Export AuthService to make it available in other modules
+  controllers: [AuthController, DoctorController],
+  providers: [AuthService, JwtAuthGuard],
+  exports: [AuthService]
 })
 export class AuthModule {}
