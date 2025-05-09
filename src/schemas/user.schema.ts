@@ -23,6 +23,9 @@ export class User {
   @Prop({ required: true, enum: ['doctor', 'patient'] })
   userType: string;
 
+  @Prop({ type: Date })
+  dob: Date;
+
   @Prop({ default: Date.now })
   createdAt: Date;
 
