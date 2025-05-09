@@ -1,15 +1,22 @@
-import { Controller, Post, Body, HttpStatus, HttpException, Headers, InternalServerErrorException } from '@nestjs/common';
+import { Controller, Post, Body, HttpStatus, HttpException, Headers, InternalServerErrorException, Param, Req } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { User, UserDocument } from '../schemas/user.schema';
 import { CreateDoctorDto } from '../doctor/dto/create-doctor.dto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
+import { UseGuards, Get, Request } from '@nestjs/common';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { CreateHealthRecordDto } from '../patient/dto/create-health-record.dto';
+import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
+import { Request as ExpressRequest } from 'express';
 
 @Controller('auth/doctors')
 export class DoctorController {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
     private authService: AuthService
   ) {}
 
@@ -94,5 +101,87 @@ export class DoctorController {
         'An error occurred while registering the doctor. Please try again.'
       );
     }
+  }
+
+  @Get('patients')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  async getPatientsList(@Request() req) {
+    const hospitalId = req.user.hospitalId;
+    
+    // Fetch patients from the same hospital
+    const patients = await this.userModel.find(
+      { hospitalId: hospitalId, userType: 'patient' },
+      { password: 0 } // Exclude password field
+    );
+
+    return {
+      message: 'Patients list retrieved successfully',
+      data: patients
+    };
+  }
+
+  @Post('patients/:patientId/health-records')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  async createHealthRecord(
+    @Param('patientId') patientId: string,
+    @Body() createHealthRecordDto: CreateHealthRecordDto,
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+  ) {
+    const doctorId = req.user.sub;
+    const hospitalId = req.user.hospitalId;
+
+    // Verify patient exists and belongs to same hospital
+    const patient = await this.userModel.findOne({
+      _id: patientId,
+      hospitalId: hospitalId,
+      userType: 'patient'
+    });
+
+    if (!patient) {
+      throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+    }
+
+    const healthRecord = new this.healthRecordModel({
+      ...createHealthRecordDto,
+      patientId,
+      doctorId,
+      hospitalId
+    });
+
+    const savedRecord = await healthRecord.save();
+
+    return {
+      message: 'Health record created successfully',
+      data: savedRecord
+    };
+  }
+
+  @Get('patients/:patientId/health-records')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  async getPatientHealthRecords(
+    @Param('patientId') patientId: string,
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+  ) {
+    const hospitalId = req.user.hospitalId;
+    
+    // Verify patient exists and belongs to same hospital
+    const patient = await this.userModel.findOne({
+      _id: patientId,
+      hospitalId: hospitalId,
+      userType: 'patient'
+    });
+
+    if (!patient) {
+      throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+    }
+
+    const records = await this.healthRecordModel.find({ patientId })
+      .populate('doctorId', 'name')
+      .sort({ visitDate: -1 });
+
+    return {
+      message: 'Patient health records retrieved successfully',
+      data: records
+    };
   }
 }

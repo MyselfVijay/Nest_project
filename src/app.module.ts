@@ -5,7 +5,10 @@ import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env'
+    }),
     MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/hospital-management'),
     AuthModule,
   ],

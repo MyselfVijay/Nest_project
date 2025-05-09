@@ -1,15 +1,21 @@
-import { Controller, Post, Get, Delete, Body, Param, HttpStatus, HttpException, Headers } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Body, Param, HttpStatus, HttpException, Headers, Req } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../schemas/user.schema';
 import { CreatePatientDto } from '../patient/dto/create-patient.dto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
+import { UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Request as ExpressRequest } from 'express';
+import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 
 @Controller('auth/patients')
 export class PatientController {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
     private authService: AuthService
   ) {}
 
@@ -157,5 +163,20 @@ export class PatientController {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  } // Add closing brace here
+
+  @Get('health-records')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['patient']))
+  async getMyHealthRecords(@Req() req: ExpressRequest & { user: { sub: string } }) {
+    const patientId = req.user.sub;
+    
+    const records = await this.healthRecordModel.find({ patientId })
+      .populate('doctorId', 'name')
+      .sort({ visitDate: -1 });
+  
+    return {
+      message: 'Health records retrieved successfully',
+      data: records
+    };
   }
 }

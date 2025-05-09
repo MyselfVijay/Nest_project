@@ -27,16 +27,21 @@ export class AuthService {
     const payload = {
       sub: user._id.toString(),
       email: user.email,
-      userType: user.userType
+      userType: user.userType,
+      hospitalId: user.hospitalId,
+      iat: Math.floor(Date.now() / 1000)
     };
 
+    const accessToken = this.jwtService.sign(payload);
+
     return {
-      accessToken: this.jwtService.sign(payload),
+      accessToken,
       user: {
         _id: user._id,
         name: user.name,
         email: user.email,
-        userType: user.userType
+        userType: user.userType,
+        hospitalId: user.hospitalId
       }
     };
   }
@@ -50,11 +55,9 @@ export class AuthService {
     };
 
     const accessToken = this.jwtService.sign(payload);
-    const decodedToken = this.jwtService.decode(accessToken);
 
     return {
-      accessToken,
-      decodedToken
+      accessToken
     };
   }
 }
