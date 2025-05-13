@@ -122,6 +122,75 @@ export class DoctorController {
     };
   }
 
+  @Get('hospital-patients')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  async getHospitalPatients(
+    @Request() req,
+    @Query('name') name?: string,
+    @Query('email') email?: string,
+    @Query('patientId') patientId?: string
+  ) {
+    const patients = await this.doctorService.getHospitalPatients(
+      req.user.hospitalId,
+      { name, email, patientId }
+    );
+    return {
+      message: "Hospital patient's list retrieved successfully",
+      data: patients
+    };
+  }
+
+  @Get('hospital-health-records')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  async getHospitalHealthRecords(
+    @Request() req,
+    @Query() filters: {
+      patientName?: string,
+      patientId?: string,
+      diagnosis?: string,
+      fromDate?: string,
+      toDate?: string
+    }
+  ) {
+    const records = await this.doctorService.getHospitalHealthRecords(
+      req.user.hospitalId,
+      filters
+    );
+    return {
+      message: 'Hospital health records retrieved successfully',
+      data: records
+    };
+  }
+
+  @Get('patients/health-records/:patientId')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  async getPatientHealthRecords(
+    @Param('patientId') patientId: string,
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+  ) {
+    const hospitalId = req.user.hospitalId;
+    
+    // Verify patient exists and belongs to same hospital
+    const patient = await this.userModel.findOne({
+      _id: patientId,
+      hospitalId: hospitalId,
+      userType: 'patient'
+    });
+
+    if (!patient) {
+      throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+    }
+
+    const records = await this.healthRecordModel.find({ patientId })
+      .populate('doctorId', 'name')
+      .sort({ visitDate: -1 });
+
+    return {
+      message: 'Patient health records retrieved successfully',
+      data: records
+    };
+  }
+
   @Post('patients/:patientId/health-records')
   @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
   async createHealthRecord(
@@ -158,150 +227,48 @@ export class DoctorController {
     };
   }
 
-  @Get('patients/health-records/:patientId')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
-  async getPatientHealthRecords(
-    @Param('patientId') patientId: string,
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+  @Get('available')
+  @UseGuards(JwtAuthGuard)
+  async getAvailableDoctors(
+    @Request() req,
+    @Query('date') dateStr: string
   ) {
-    const hospitalId = req.user.hospitalId;
-    
-    // Verify patient exists and belongs to same hospital
-    const patient = await this.userModel.findOne({
-      _id: patientId,
-      hospitalId: hospitalId,
-      userType: 'patient'
-    });
-
-    if (!patient) {
-      throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) {
+      throw new HttpException('Invalid date format', HttpStatus.BAD_REQUEST);
     }
 
-    const records = await this.healthRecordModel.find({ patientId })
-      .populate('doctorId', 'name')
-      .sort({ visitDate: -1 });
-
+    const doctors = await this.doctorService.getAvailableDoctors(req.user.hospitalId, date);
+    
     return {
-      message: 'Patient health records retrieved successfully',
-      data: records
+      message: 'Available doctors retrieved successfully',
+      data: doctors
     };
   }
 
-  @Get('hospital-patients')
+  @Post('availability')
   @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
-  async getHospitalPatients(
+  async setAvailability(
     @Request() req,
-    @Query('name') name?: string,
-    @Query('email') email?: string,
-    @Query('patientId') patientId?: string
+    @Body() availabilityDto: { fromTime: string; toTime: string }
   ) {
-    const hospitalId = req.user.hospitalId;
-    
-    // Build filter query
-    const filter: any = { hospitalId, userType: 'patient' };
-    
-    if (name) {
-      filter.name = { $regex: name, $options: 'i' };
-    }
-    if (email) {
-      filter.email = { $regex: email, $options: 'i' };
-    }
-    if (patientId) {
-      filter._id = patientId;
-    }
-  
-    // Fetch filtered patients with specific field selection
-    const patients = await this.userModel.find(
-      filter,
-      { password: 0 }
-    ).select('name email mobileNo createdAt');
-  
-    // Detailed error message
-    if (patients.length === 0) {
-      let message = 'No patients found';
-      if (name) message += ` with name "${name}"`;
-      if (email) message += ` with email "${email}"`;
-      if (patientId) message += ` with ID "${patientId}"`;
-      message += '. Please verify the search criteria.';
-  
-      return {
-        message,
-        data: []
-      };
-    }
-  
-    return {
-      message: 'Hospital patients retrieved successfully',
-      data: patients
-    };
-  }
+    const fromTime = new Date(availabilityDto.fromTime);
+    const toTime = new Date(availabilityDto.toTime);
 
-  @Get('hospital-health-records')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
-  async getHospitalHealthRecords(
-    @Request() req,
-    @Query('patientName') patientName?: string,
-    @Query('patientId') patientId?: string,
-    @Query('diagnosis') diagnosis?: string,
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string
-  ) {
-    const records = await this.doctorService.getHospitalHealthRecords(
+    if (isNaN(fromTime.getTime()) || isNaN(toTime.getTime())) {
+      throw new HttpException('Invalid date format', HttpStatus.BAD_REQUEST);
+    }
+
+    const availability = await this.doctorService.setDoctorAvailability(
+      req.user.sub,
       req.user.hospitalId,
-      { patientName, patientId, diagnosis, fromDate, toDate }
+      fromTime,
+      toTime
     );
-  
-    return {
-      message: records.length > 0 
-        ? 'Hospital health records retrieved successfully'
-        : 'No health records found in the hospital',
-      data: records
-    };
-  }
 
-  @Get('patients/:patientId/health-records')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
-  async getPatientHealthRecords(
-    @Param('patientId') patientId: string,
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
-  ) {
-    const records = await this.doctorService.getPatientHealthRecords(
-      patientId,
-      req.user.hospitalId
-    );
-  
     return {
-      message: 'Patient health records retrieved successfully',
-      data: records
-    };
-  }
-
-  @Get('hospital-patients')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
-  async getHospitalPatients(
-    @Request() req,
-    @Query('name') name?: string,
-    @Query('email') email?: string,
-    @Query('patientId') patientId?: string
-  ) {
-    const patients = await this.doctorService.getHospitalPatients(
-      req.user.hospitalId,
-      { name, email, patientId }
-    );
-  
-    if (patients.length === 0) {
-      let message = 'No patients found';
-      if (name) message += ` with name "${name}"`;
-      if (email) message += ` with email "${email}"`;
-      if (patientId) message += ` with ID "${patientId}"`;
-      message += '. Please verify the search criteria.';
-  
-      return { message, data: [] };
-    }
-  
-    return {
-      message: 'Hospital patients retrieved successfully',
-      data: patients
+      message: 'Availability set successfully',
+      data: availability
     };
   }
 }

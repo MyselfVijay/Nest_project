@@ -1,17 +1,21 @@
-import { Injectable, ConflictException, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { User } from '../schemas/user.schema';
-import { HealthRecord } from '../schemas/health-record.schema';
+import { User, UserDocument } from '../schemas/user.schema';
+import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import * as bcrypt from 'bcryptjs';
+import { DoctorAvailability, DoctorAvailabilityDocument } from '../schemas/doctor-availability.schema';
+import { Appointment, AppointmentDocument } from '../schemas/appointment.schema';
 
 @Injectable()
 export class DoctorService {
   constructor(
-    @InjectModel(User.name) private userModel: Model<User>,
-    @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecord>
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
+    @InjectModel(DoctorAvailability.name) private availabilityModel: Model<DoctorAvailabilityDocument>,
+    @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>
   ) {}
 
   async create(createDoctorDto: CreateDoctorDto, hospitalId: string) {
@@ -214,5 +218,97 @@ export class DoctorService {
       filter,
       { password: 0 }
     ).select('name email mobileNo createdAt');
+  }
+
+  async getAvailableDoctors(hospitalId: string, date: Date) {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+  
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+  
+    // Get all availabilities for the day
+    const availabilities = await this.availabilityModel.find({
+      hospitalId,
+      fromTime: { $gte: startOfDay },
+      toTime: { $lte: endOfDay },
+      isAvailable: true
+    }).populate('doctorId', 'name email');
+  
+    // Get all booked appointments for the day
+    const bookedAppointments = await this.appointmentModel.find({
+      hospitalId,
+      appointmentTime: { $gte: startOfDay, $lte: endOfDay },
+      status: 'scheduled'
+    });
+  
+    // Create a map of booked time slots for each doctor
+    const bookedSlots = new Map();
+    bookedAppointments.forEach(appointment => {
+      if (!bookedSlots.has(appointment.doctorId.toString())) {
+        bookedSlots.set(appointment.doctorId.toString(), []);
+      }
+      bookedSlots.get(appointment.doctorId.toString()).push(appointment.appointmentTime);
+    });
+  
+    // Filter out availabilities where the doctor has appointments
+    const availableDoctors = availabilities.filter(availability => {
+      const doctorId = (availability.doctorId as any)._id.toString();
+      const doctorBookings = bookedSlots.get(doctorId) || [];
+      
+      // Check if any booking time falls within this availability window
+      return !doctorBookings.some(bookingTime => 
+        bookingTime >= availability.fromTime && bookingTime <= availability.toTime
+      );
+    });
+  
+    return availableDoctors;
+  }
+
+  async setDoctorAvailability(doctorId: string, hospitalId: string, fromTime: Date, toTime: Date) {
+    const availability = new this.availabilityModel({
+      doctorId,
+      hospitalId,
+      fromTime,
+      toTime
+    });
+
+    return await availability.save();
+  }
+
+  async bookAppointment(doctorId: string, patientId: string, hospitalId: string, appointmentTime: Date) {
+    // Check if doctor is available
+    const availability = await this.availabilityModel.findOne({
+      doctorId,
+      hospitalId,
+      fromTime: { $lte: appointmentTime },
+      toTime: { $gte: appointmentTime },
+      isAvailable: true
+    });
+
+    if (!availability) {
+      throw new HttpException('Doctor is not available at this time', HttpStatus.BAD_REQUEST);
+    }
+
+    // Check for existing appointments
+    const existingAppointment = await this.appointmentModel.findOne({
+      doctorId,
+      appointmentTime,
+      status: 'scheduled'
+    });
+
+    if (existingAppointment) {
+      throw new HttpException('This time slot is already booked', HttpStatus.CONFLICT);
+    }
+
+    const appointment = new this.appointmentModel({
+      doctorId,
+      patientId,
+      hospitalId,
+      appointmentTime,
+      status: 'scheduled'
+    });
+
+    return await appointment.save();
   }
 }

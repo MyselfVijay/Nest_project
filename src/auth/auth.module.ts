@@ -7,10 +7,11 @@ import { User, UserSchema } from '../schemas/user.schema';
 import { HealthRecord, HealthRecordSchema } from '../schemas/health-record.schema';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { DoctorController } from './doctor.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PatientController } from './patient.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { DoctorModule } from '../doctor/doctor.module';
+import { DoctorController } from './doctor.controller';
 
 @Module({
   imports: [
@@ -28,8 +29,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       }),
       inject: [ConfigService],
     }),
+    DoctorModule
   ],
-  controllers: [AuthController, DoctorController, PatientController],
+  controllers: [AuthController, PatientController, DoctorController],
   providers: [AuthService, JwtAuthGuard, JwtStrategy],
   exports: [AuthService]
 })

@@ -10,13 +10,16 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { Request as ExpressRequest } from 'express';
 import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
+import { DoctorService } from '../doctor/doctor.service';
+import { Request } from '@nestjs/common';
 
 @Controller('auth/patients')
 export class PatientController {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
-    private authService: AuthService
+    private authService: AuthService,
+    private doctorService: DoctorService
   ) {}
 
   @Post('register')
@@ -177,6 +180,30 @@ export class PatientController {
     return {
       message: 'Health records retrieved successfully',
       data: records
+    };
+  }
+
+  @Post('appointments')
+  @UseGuards(JwtAuthGuard, new RolesGuard(['patient']))
+  async bookAppointment(
+    @Request() req,
+    @Body() bookingDto: { doctorId: string; appointmentTime: string }
+  ) {
+    const appointmentTime = new Date(bookingDto.appointmentTime);
+    if (isNaN(appointmentTime.getTime())) {
+      throw new HttpException('Invalid date format', HttpStatus.BAD_REQUEST);
+    }
+
+    const appointment = await this.doctorService.bookAppointment(
+      bookingDto.doctorId,
+      req.user.sub,
+      req.user.hospitalId,
+      appointmentTime
+    );
+
+    return {
+      message: 'Appointment booked successfully',
+      data: appointment
     };
   }
 }

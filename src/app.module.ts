@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
+import { User, UserSchema } from './schemas/user.schema';
+import { HealthRecord, HealthRecordSchema } from './schemas/health-record.schema';
+import { DoctorAvailability, DoctorAvailabilitySchema } from './schemas/doctor-availability.schema';
+import { Appointment, AppointmentSchema } from './schemas/appointment.schema';
 
 @Module({
   imports: [
@@ -11,6 +15,12 @@ import { ConfigModule } from '@nestjs/config';
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/hospital-management'),
     AuthModule,
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: HealthRecord.name, schema: HealthRecordSchema },
+      { name: DoctorAvailability.name, schema: DoctorAvailabilitySchema },
+      { name: Appointment.name, schema: AppointmentSchema }
+    ])
   ],
-})  
+})
 export class AppModule {}
