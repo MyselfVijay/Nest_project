@@ -198,7 +198,7 @@ export class PatientController {
       bookingDto.doctorId,
       req.user.sub,
       req.user.hospitalId,
-      appointmentTime
+      appointmentTime.toISOString()
     );
 
     return {

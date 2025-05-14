@@ -42,7 +42,7 @@ export class DoctorController {
       slot.doctorId.toString(),
       appointmentData.patientId,
       hospitalId,
-      slot.fromTime
+      slot.fromTime.toISOString()
     );
   }
 
