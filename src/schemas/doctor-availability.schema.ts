@@ -12,6 +12,12 @@ export class DoctorAvailability {
   hospitalId: string;
 
   @Prop({ required: true })
+  slotDate: Date;
+
+  @Prop({ required: true })
+  slotTime: string; // Format: "10:00-10:15"
+
+  @Prop({ required: true })
   fromTime: Date;
 
   @Prop({ required: true })
