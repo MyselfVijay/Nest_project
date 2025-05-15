@@ -3,7 +3,7 @@ import { Document, Types } from 'mongoose';
 
 export type UserDocument = User & Document;
 
-@Schema()
+@Schema({ timestamps: true })
 export class User {
   @Prop({ required: true })
   name: string;
@@ -31,6 +31,11 @@ export class User {
 
   @Prop()
   lastLogin: Date;
-}
 
+  @Prop()
+  resetPasswordOtp?: string;
+
+  @Prop()
+  resetPasswordOtpExpiry?: Date;
+}
 export const UserSchema = SchemaFactory.createForClass(User);

@@ -3,10 +3,22 @@ import { PatientService } from './patient.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RoleGuard } from '../auth/guards/role.guard';
 import { Role } from '../auth/decorators/role.decorator';
+import { SendOtpDto } from './dto/send-otp.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
-@Controller('patients')
+@Controller('patient')
 export class PatientController {
   constructor(private readonly patientService: PatientService) {}
+
+  @Post('send-otp')
+  async sendOtp(@Body() sendOtpDto: SendOtpDto) {
+    return this.patientService.sendOtp(sendOtpDto);
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.patientService.resetPassword(resetPasswordDto);
+  }
 
   // CREATE - Register new patient
   @Post()
