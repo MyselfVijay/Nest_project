@@ -1,4 +1,4 @@
-import { Controller, Put, Delete, Post, Get, Body, Param, Headers, UseGuards, Query, NotFoundException } from '@nestjs/common';
+import { Controller, Put, Delete, Post, Get, Body, Param, Headers, UseGuards, Query, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DoctorService } from './doctor.service';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -28,21 +28,19 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard)
   async bookAppointment(
     @Body() appointmentData: {
-      slotId: string;
+      doctorId: string;
       patientId: string;
+      slotTime?: string;
+      slotId?: string;
     },
     @Headers('hospital-id') hospitalId: string,
   ) {
-    const slot = await this.doctorService.getAvailabilitySlot(appointmentData.slotId);
-    if (!slot) {
-      throw new NotFoundException('Slot not found');
-    }
-
     return this.doctorService.bookAppointment(
-      slot.doctorId.toString(),
+      appointmentData.doctorId,
       appointmentData.patientId,
       hospitalId,
-      slot.fromTime.toISOString()
+      appointmentData.slotTime,
+      appointmentData.slotId
     );
   }
 
@@ -71,5 +69,37 @@ export class DoctorController {
       new Date(availabilityData.fromTime),
       new Date(availabilityData.toTime)
     );
+  }
+
+  @Get('appointments/booked')
+  @UseGuards(JwtAuthGuard)
+  async getBookedAppointments(
+    @Headers('hospital-id') hospitalId: string,
+    @Query('doctorId') doctorId?: string,
+    @Query('patientId') patientId?: string,
+    @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string,
+    @Query('status') status?: 'scheduled' | 'completed' | 'cancelled'
+  ) {
+    return this.doctorService.getBookedAppointments(hospitalId, {
+      doctorId,
+      patientId,
+      fromDate: fromDate ? new Date(fromDate) : undefined,
+      toDate: toDate ? new Date(toDate) : undefined,
+      status
+    });
+  }
+
+  @Get('slots/available')
+  @UseGuards(JwtAuthGuard)
+  async getAvailableSlots(
+    @Headers('hospital-id') hospitalId: string,
+    @Query('date') date: string,
+    @Query('doctorId') doctorId?: string
+  ) {
+    if (!date) {
+      throw new BadRequestException('Date is required');
+    }
+    return this.doctorService.getAvailableDoctors(hospitalId, new Date(date));
   }
 }

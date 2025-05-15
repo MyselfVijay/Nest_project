@@ -1,7 +1,7 @@
 import { Injectable, ConflictException, NotFoundException, BadRequestException, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import { User, UserDocument } from '../schemas/user.schema';
+import { Model } from 'mongoose';
+import { InjectModel } from '@nestjs/mongoose';
 import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
@@ -257,10 +257,10 @@ export class DoctorService {
       throw new NotFoundException('Doctor not found or does not belong to this hospital');
     }
 
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 5; // Reduced from 10 to 5
     const SLOT_DURATION = 30;
+    const BATCH_DELAY = 300; // ms delay between batches
     
-    // Ensure dates are properly parsed and in UTC
     const startTime = new Date(fromTime);
     const endTime = new Date(toTime);
     
@@ -305,11 +305,11 @@ export class DoctorService {
     for (let i = 0; i < numberOfSlots; i++) {
       const slotEndTime = new Date(currentTime.getTime() + SLOT_DURATION * 60000);
       
-      // Format time for display using local time
-      const startHour = currentTime.getHours().toString().padStart(2, '0');
-      const startMin = currentTime.getMinutes().toString().padStart(2, '0');
-      const endHour = slotEndTime.getHours().toString().padStart(2, '0');
-      const endMin = slotEndTime.getMinutes().toString().padStart(2, '0');
+      // Format time for display using UTC time
+      const startHour = currentTime.getUTCHours().toString().padStart(2, '0');
+      const startMin = currentTime.getUTCMinutes().toString().padStart(2, '0');
+      const endHour = slotEndTime.getUTCHours().toString().padStart(2, '0');
+      const endMin = slotEndTime.getUTCMinutes().toString().padStart(2, '0');
 
       const slot = {
         doctorId,
@@ -451,112 +451,81 @@ export class DoctorService {
     };
   }
 
-  async bookAppointment(doctorId: string, patientId: string, hospitalId: string, slotTime: string) {
+  async bookAppointment(doctorId: string, patientId: string, hospitalId: string, slotTime?: string, slotId?: string) {
     try {
       // Input validation
-      if (!doctorId || !patientId || !hospitalId || !slotTime) {
-        throw new BadRequestException('All fields are required');
+      if (!doctorId || !patientId || !hospitalId || (!slotTime && !slotId)) {
+        throw new BadRequestException('Either slotTime or slotId is required');
       }
 
-      // Validate slot time format (HH:MM-HH:MM)
-      if (!slotTime.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]-([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
-        throw new BadRequestException('Invalid slot time format. Use format HH:MM-HH:MM (e.g., 09:00-09:30)');
-      }
-
-      console.log('Debug - Booking appointment:', {
-        doctorId,
-        patientId,
-        hospitalId,
-        slotTime
-      });
-
-      // Validate MongoDB ObjectId format for doctorId and patientId
+      // Validate MongoDB ObjectId format
       if (!doctorId.match(/^[0-9a-fA-F]{24}$/) || !patientId.match(/^[0-9a-fA-F]{24}$/)) {
         throw new BadRequestException('Invalid doctor or patient ID format');
       }
-
-      // Verify doctor exists and belongs to hospital
-      const doctor = await this.userModel.findOne({ _id: doctorId, hospitalId, userType: 'doctor' });
-      if (!doctor) {
-        throw new NotFoundException('Doctor not found or does not belong to this hospital');
+      
+      if (slotId && !slotId.match(/^[0-9a-fA-F]{24}$/)) {
+        throw new BadRequestException('Invalid slot ID format');
       }
 
-      // Verify patient exists and belongs to hospital
-      const patient = await this.userModel.findOne({ _id: patientId, hospitalId, userType: 'patient' });
-      if (!patient) {
-        throw new NotFoundException('Patient not found or does not belong to this hospital');
-      }
+      // Get today's date at start of day in UTC
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
 
-      // Get all available slots for debugging
-      const allAvailableSlots = await this.availabilityModel.find({
-        doctorId,
-        hospitalId,
-        isAvailable: true
-      }).sort({ fromTime: 1 });
+      let availability;
 
-      console.log('Debug - All available slots:', {
-        totalSlots: allAvailableSlots.length,
-        slots: allAvailableSlots.map(slot => ({
-          slotTime: slot.slotTime,
-          fromTime: slot.fromTime.toISOString(),
-          toTime: slot.toTime.toISOString(),
-          isAvailable: slot.isAvailable
-        }))
-      });
+      if (slotId) {
+        // Find slot by ID
+        availability = await this.availabilityModel.findOne({
+          _id: slotId,
+          doctorId,
+          hospitalId,
+          isAvailable: true
+        });
 
-      // Find the slot with matching slotTime
-      const availability = await this.availabilityModel.findOne({
-        doctorId,
-        hospitalId,
-        slotTime,
-        isAvailable: true
-      });
+        if (!availability) {
+          throw new NotFoundException(`No available slot found with ID: ${slotId}`);
+        }
+      } else if (slotTime) {
+        // Validate slot time format (HH:MM-HH:MM)
+        if (!slotTime.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]-([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
+          throw new BadRequestException('Invalid slot time format. Use format HH:MM-HH:MM (e.g., 09:00-09:30)');
+        }
 
-      console.log('Debug - Availability check:', {
-        query: {
+        // Find slot by time
+        availability = await this.availabilityModel.findOne({
           doctorId,
           hospitalId,
           slotTime,
-          isAvailable: true
-        },
-        found: availability ? {
-          _id: availability._id,
-          slotTime: availability.slotTime,
-          fromTime: availability.fromTime.toISOString(),
-          toTime: availability.toTime.toISOString(),
-          isAvailable: availability.isAvailable
-        } : null
-      });
-    
-      if (!availability) {
-        if (allAvailableSlots.length === 0) {
-          throw new NotFoundException('No available slots found for this doctor');
-        } else {
-          throw new NotFoundException(
-            `No matching slot found. Available slots are: ${allAvailableSlots
-              .map(slot => slot.slotTime)
-              .join(', ')}`
-          );
+          isAvailable: true,
+          slotDate: { $gte: today }
+        }).sort({ slotDate: 1, fromTime: 1 });
+
+        if (!availability) {
+          throw new NotFoundException(`No available slot found for time: ${slotTime}`);
         }
+      }
+
+      if (!availability) {
+        throw new NotFoundException('No available slot found');
       }
 
       // Check if slot time is in the future
       if (availability.fromTime <= new Date()) {
         throw new BadRequestException('Cannot book appointments for past time slots');
       }
-    
-      // Check for existing appointments at the same time
+
+      // Check for existing appointments
       const existingAppointment = await this.appointmentModel.findOne({
         doctorId,
         appointmentTime: availability.fromTime,
         status: 'scheduled'
       });
-    
+
       if (existingAppointment) {
         throw new ConflictException('This time slot is already booked');
       }
 
-      // Check if patient already has an appointment at this time
+      // Check patient's existing appointments
       const patientExistingAppointment = await this.appointmentModel.findOne({
         patientId,
         appointmentTime: availability.fromTime,
@@ -566,8 +535,8 @@ export class DoctorService {
       if (patientExistingAppointment) {
         throw new ConflictException('You already have an appointment scheduled at this time');
       }
-    
-      // Create new appointment
+
+      // Create appointment and mark slot as unavailable
       const appointment = new this.appointmentModel({
         doctorId,
         patientId,
@@ -575,16 +544,28 @@ export class DoctorService {
         appointmentTime: availability.fromTime,
         status: 'scheduled'
       });
-    
-      // Mark the slot as unavailable
+
       await this.availabilityModel.findByIdAndUpdate(
         availability._id,
         { isAvailable: false }
       );
-    
+
+      // Fetch doctor and patient information
+      const doctor = await this.userModel.findById(doctorId);
+      const patient = await this.userModel.findById(patientId);
+
+      if (!doctor || doctor.userType !== 'doctor') {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      if (!patient || patient.userType !== 'patient') {
+        throw new NotFoundException('Patient not found');
+      }
+
       const savedAppointment = await appointment.save();
-      
+
       return {
+        message: "Appointment booked successfully",
         data: {
           _id: savedAppointment._id,
           doctor: {
@@ -610,7 +591,7 @@ export class DoctorService {
       }
       throw new InternalServerErrorException('Failed to book appointment: ' + error.message);
     }
-  }
+}
 
   async getBookedAppointments(hospitalId: string, filters: {
       doctorId?: string,
@@ -669,7 +650,7 @@ export class DoctorService {
       .lean();
 
     return {
-      message: 'Appointments retrieved successfully',
+      message: "Appointments retrieved successfully",
       data: appointments
     };
   }

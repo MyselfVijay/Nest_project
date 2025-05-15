@@ -1,4 +1,4 @@
-const { Schema, Prop, SchemaFactory } = require('@nestjs/mongoose');
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
 export type DoctorAvailabilityDocument = DoctorAvailability & Document;
@@ -34,3 +34,9 @@ export class DoctorAvailability {
 }
 
 export const DoctorAvailabilitySchema = SchemaFactory.createForClass(DoctorAvailability);
+
+// Add indexes for frequently queried fields
+DoctorAvailabilitySchema.index({ doctorId: 1, hospitalId: 1 });
+DoctorAvailabilitySchema.index({ fromTime: 1, toTime: 1 });
+DoctorAvailabilitySchema.index({ slotTime: 1 });
+DoctorAvailabilitySchema.index({ isAvailable: 1 });
