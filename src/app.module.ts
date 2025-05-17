@@ -12,8 +12,7 @@ import { PatientModule } from './patient/patient.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: '.env'
+      isGlobal: true  // Make ConfigModule globally available
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/hospital-management'),
     AuthModule,

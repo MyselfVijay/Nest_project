@@ -650,7 +650,7 @@ export class DoctorService {
       .lean();
 
     return {
-      message: "Appointments retrieved successfully",
+      message: "Booked Appointments list retrieved successfully",
       data: appointments
     };
   }
