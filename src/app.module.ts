@@ -8,6 +8,7 @@ import { DoctorAvailability, DoctorAvailabilitySchema } from './schemas/doctor-a
 import { Appointment, AppointmentSchema } from './schemas/appointment.schema';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { PatientModule } from './patient/patient.module';
+import { PaymentModule } from './payment/payment.module';
 
 @Module({
   imports: [
@@ -33,7 +34,8 @@ import { PatientModule } from './patient/patient.module';
           pass: process.env.EMAIL_PASSWORD
         }
       }
-    })
+    }),
+    PaymentModule,
   ]
 })
 export class AppModule {}
