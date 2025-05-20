@@ -9,9 +9,12 @@ import { Appointment, AppointmentSchema } from './schemas/appointment.schema';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { PatientModule } from './patient/patient.module';
 import { PaymentModule } from './payment/payment.module';
+// Remove this line:
+// import { RedisModule } from '@liaoliaots/nestjs-redis';
 
 @Module({
   imports: [
+    // Remove RedisModule.forRoot() configuration
     ConfigModule.forRoot({
       isGlobal: true  // Make ConfigModule globally available
     }),

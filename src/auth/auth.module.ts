@@ -12,6 +12,7 @@ import { PatientController } from './patient.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { DoctorModule } from '../doctor/doctor.module';
 import { DoctorController } from './doctor.controller';
+import { RedisService } from '../payment/redis.service';
 
 @Module({
   imports: [
@@ -32,7 +33,7 @@ import { DoctorController } from './doctor.controller';
     DoctorModule
   ],
   controllers: [AuthController, PatientController, DoctorController],
-  providers: [AuthService, JwtAuthGuard, JwtStrategy],
+  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService],
   exports: [AuthService]
 })
 export class AuthModule {}

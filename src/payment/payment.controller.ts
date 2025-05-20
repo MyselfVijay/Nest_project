@@ -1,23 +1,28 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { PaymentService } from './payment.service';
+import { CreateOrderDto, VerifyPaymentDto } from './dto/payment.dto';
 
 @Controller('payment')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
   @Post('create-order')
-  async createOrder(@Body() body: { amount: number; currency?: string }) {
-    return this.paymentService.createOrder(body.amount, body.currency);
+  @HttpCode(HttpStatus.CREATED)
+  async createOrder(@Body() createOrderDto: CreateOrderDto) {
+    return this.paymentService.createOrder(
+      createOrderDto.amount,
+      createOrderDto.userId, // Add userId parameter
+      createOrderDto.currency || 'INR' // Provide default value for currency
+    );
   }
 
   @Post('verify')
-  async verifyPayment(
-    @Body() body: { orderId: string; paymentId: string; signature: string },
-  ) {
+  @HttpCode(HttpStatus.OK)
+  async verifyPayment(@Body() verifyPaymentDto: VerifyPaymentDto) {
     return this.paymentService.verifyPayment(
-      body.orderId,
-      body.paymentId,
-      body.signature,
+      verifyPaymentDto.orderId,
+      verifyPaymentDto.paymentId,
+      verifyPaymentDto.signature
     );
   }
 }
