@@ -2,6 +2,7 @@ import { Controller, Put, Delete, Post, Get, Body, Param, Headers, UseGuards, Qu
 import { DoctorService } from './doctor.service';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Request as Req } from '@nestjs/common';
 
 @Controller('doctors')
 export class DoctorController {
@@ -101,5 +102,19 @@ export class DoctorController {
       throw new BadRequestException('Date is required');
     }
     return this.doctorService.getAvailableDoctors(hospitalId, new Date(date));
+  }
+
+  @Get('hospital-patients-details')
+  @UseGuards(JwtAuthGuard)
+  async getHospitalPatientsDetails(
+    @Req() req,
+    @Query() filters: {
+      name?: string,
+      email?: string,
+      fromDate?: string,
+      toDate?: string
+    }
+  ) {
+    return this.doctorService.getHospitalPatientsDetails(req.user.hospitalId, filters);
   }
 }

@@ -1,16 +1,22 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 import { RedisService } from './redis.service';
+import { Payment } from '../schemas/payment.schema';
 
 @Injectable()
 export class PaymentService {
-  private razorpay: Razorpay;
+  private readonly razorpay: Razorpay;
   private readonly lockTTL = 300; // 5 minutes lock timeout
   private readonly maxPaymentAttempts = 5;
   private readonly paymentLockDuration = 3600; // 1 hour in seconds
 
-  constructor(private readonly redisService: RedisService) {
+  constructor(
+    @InjectModel(Payment.name) private paymentModel: Model<Payment>,
+    private readonly redisService: RedisService
+  ) {
     this.razorpay = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -151,6 +157,18 @@ export class PaymentService {
 
       try {
         const order = await this.razorpay.orders.create(options);
+        
+        // Create payment document in MongoDB
+        const payment = new this.paymentModel({
+          orderId: order.id,
+          userId,
+          amount: amount,
+          currency,
+          status: 'created',
+          paymentDetails: order
+        });
+        await payment.save();
+        
         await this.setPaymentState(order.id, 'created', { ...order, userId, amount });
 
         return {
@@ -172,5 +190,49 @@ export class PaymentService {
         error: error.message
       };
     }
+}
+
+  async handlePaymentSuccess(paymentEntity: any) {
+    try {
+      // Update payment status in database
+      await this.updatePaymentStatus(paymentEntity.order_id, 'success', paymentEntity);
+      
+      // You can add additional success handling here
+      // For example: send confirmation email, update inventory, etc.
+      
+      return { status: 'success', message: 'Payment processed successfully' };
+    } catch (error) {
+      console.error('Payment success handling error:', error);
+      throw error;
+    }
+  }
+  
+  async handlePaymentFailure(paymentEntity: any) {
+    try {
+      // Update payment status in database
+      await this.updatePaymentStatus(paymentEntity.order_id, 'failed', paymentEntity);
+      
+      // You can add additional failure handling here
+      // For example: notify user, release held inventory, etc.
+      
+      return { status: 'failed', message: 'Payment failed' };
+    } catch (error) {
+      console.error('Payment failure handling error:', error);
+      throw error;
+    }
+  }
+  
+  private async updatePaymentStatus(orderId: string, status: 'success' | 'failed', paymentDetails: any) {
+    // Implement your database update logic here
+    // This is just a placeholder - adjust according to your database schema
+    return this.paymentModel.findOneAndUpdate(
+      { orderId },
+      {
+        status,
+        paymentDetails,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
   }
 }

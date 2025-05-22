@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, UnauthorizedException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
@@ -6,6 +6,8 @@ import { User } from '../schemas/user.schema';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import { RedisService } from '../payment/redis.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -147,6 +149,54 @@ export class AuthService {
 
     return {
       accessToken
+    };
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
+    const { email } = forgotPasswordDto;
+    const user = await this.userModel.findOne({ email });
+    
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+  
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store OTP in Redis with 10 minutes expiration
+    await this.redisService.set(`reset_otp:${email}`, otp, 600);
+  
+    // Send email with OTP
+    // TODO: Implement email sending logic
+  
+    return {
+      message: 'Password reset instructions sent to your email',
+      statusCode: 200
+    };
+}
+  
+  async resetPassword(resetPasswordDto: ResetPasswordDto) {
+    const { email, otp, newPassword } = resetPasswordDto;
+    
+    // Verify OTP
+    const storedOtp = await this.redisService.get(`reset_otp:${email}`);
+    if (!storedOtp || storedOtp !== otp) {
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+  
+    // Update password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.userModel.findOneAndUpdate(
+      { email },
+      { password: hashedPassword }
+    );
+  
+    // Clear OTP
+    await this.redisService.del(`reset_otp:${email}`);
+  
+    return {
+      message: 'Password reset successful',
+      statusCode: 200
     };
   }
 }

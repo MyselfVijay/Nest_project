@@ -133,16 +133,44 @@ export class PatientService {
     try {
       const { email, otp, newPassword } = resetPasswordDto;
       
-      if (!email || !otp || !newPassword) {
-        throw new Error('Email, OTP, and new password are required');
+      // Validate email format
+      if (!email || !email.includes('@')) {
+        return {
+          statusCode: 400,
+          message: 'Please provide a valid email address'
+        };
       }
-
-      // Check Redis first for faster validation
+  
+      // Validate password strength
+      if (!newPassword || newPassword.length < 8 || 
+          !/[A-Z]/.test(newPassword) || 
+          !/[a-z]/.test(newPassword) || 
+          !/[0-9]/.test(newPassword) || 
+          !/[!@#$%^&*]/.test(newPassword)) {
+        return {
+          statusCode: 400,
+          message: 'Password must be at least 8 characters long and contain uppercase, lowercase, numbers and special characters'
+        };
+      }
+  
+      // Check if user exists
+      const user = await this.userModel.findOne({ email });
+      if (!user) {
+        return {
+          statusCode: 404,
+          message: 'Email not found. Please check your email address'
+        };
+      }
+  
+      // Check Redis for OTP
       const storedOtp = await this.redis.get(`otp:${email}`);
       if (!storedOtp) {
-        throw new Error('OTP has expired or not found. Please request a new one');
+        return {
+          statusCode: 400,
+          message: 'OTP has expired. Please request a new one'
+        };
       }
-
+  
       if (storedOtp !== otp) {
         // Increment failed attempts
         await this.redis.incr(`failedAttempts:${email}`);
@@ -152,38 +180,37 @@ export class PatientService {
         if (attempts >= 3) {
           // Lock account for 30 minutes
           await this.redis.setex(`locked:${email}`, 1800, 'true');
-          throw new Error('Account locked due to too many failed attempts. Please try again after 30 minutes');
+          return {
+            statusCode: 429,
+            message: 'Too many invalid attempts. Account is locked for 30 minutes'
+          };
         }
         
-        throw new Error('Invalid OTP');
+        return {
+          statusCode: 400,
+          message: `Invalid OTP. ${3 - attempts} attempts remaining`
+        };
       }
-
-      const user = await this.userModel.findOne({ email });
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      // Hash the password before saving
+  
+      // Hash and update password
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      
-      // Clear all Redis keys related to OTP
-      await this.redis.multi()
-        .del(`otp:${email}`)
-        .del(`attempts:${email}`)
-        .del(`failedAttempts:${email}`)
-        .del(`locked:${email}`)
-        .exec();
-
-      // Update user in MongoDB
-      user.resetPasswordOtp = undefined;
-      user.resetPasswordOtpExpiry = undefined;
-      user.password = hashedPassword;
-      await user.save();
-      
-      return { message: 'Password reset successfully' };
+      await this.userModel.updateOne({ email }, { password: hashedPassword });
+  
+      // Clear OTP and attempts after successful reset
+      await this.redis.del(`otp:${email}`);
+      await this.redis.del(`failedAttempts:${email}`);
+  
+      return {
+        statusCode: 200,
+        message: 'Password reset successful'
+      };
+  
     } catch (error) {
-      console.error('Password reset error:', error.message);
-      throw error;
+      console.error('Password reset error:', error);
+      return {
+        statusCode: 500,
+        message: 'An error occurred while resetting password. Please try again'
+      };
     }
   }
 

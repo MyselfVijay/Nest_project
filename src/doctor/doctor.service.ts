@@ -153,32 +153,82 @@ export class DoctorService {
     fromDate?: string,
     toDate?: string
   }) {
-    const recordsFilter: any = { hospitalId };
-    
-    if (filters.patientId) {
-      recordsFilter.patientId = filters.patientId;
-    }
-    if (filters.diagnosis) {
-      recordsFilter.diagnosis = { $regex: filters.diagnosis, $options: 'i' };
-    }
-    if (filters.fromDate || filters.toDate) {
-      recordsFilter.visitDate = {};
-      if (filters.fromDate) recordsFilter.visitDate.$gte = new Date(filters.fromDate);
-      if (filters.toDate) recordsFilter.visitDate.$lte = new Date(filters.toDate);
-    }
+    try {
+      const recordsFilter: any = { hospitalId };
+      
+      if (filters.patientId) {
+        recordsFilter.patientId = filters.patientId;
+      }
+      if (filters.diagnosis) {
+        recordsFilter.diagnosis = { $regex: filters.diagnosis, $options: 'i' };
+      }
 
-    let records = await this.healthRecordModel.find(recordsFilter)
-      .populate('patientId', 'name email mobileNo')
-      .populate('doctorId', 'name email')
-      .sort({ visitDate: -1 });
+      // Handle date filtering
+      if (filters.fromDate || filters.toDate) {
+        recordsFilter.visitDate = {};
+        
+        // Parse dd/mm/yyyy to Date object
+        const parseDate = (dateStr: string) => {
+          try {
+            const [day, month, year] = dateStr.split('/');
+            if (!day || !month || !year) {
+              throw new BadRequestException('Invalid date format. Use dd/mm/yyyy');
+            }
+            const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+            if (isNaN(date.getTime())) {
+              throw new BadRequestException('Invalid date');
+            }
+            return date;
+          } catch (error) {
+            throw new BadRequestException('Invalid date format. Use dd/mm/yyyy');
+          }
+        };
 
-    if (filters.patientName) {
-      records = records.filter(record => 
-        (record.patientId as any).name?.toLowerCase().includes(filters.patientName!.toLowerCase())
-      );
+        // Handle single date query
+        if (filters.fromDate && !filters.toDate) {
+          const date = parseDate(filters.fromDate);
+          const startOfDay = new Date(date.setHours(0, 0, 0, 0));
+          const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+          recordsFilter.visitDate = {
+            $gte: startOfDay,
+            $lte: endOfDay
+          };
+        } 
+        // Handle date range query
+        else if (filters.fromDate && filters.toDate) {
+          const fromDate = parseDate(filters.fromDate);
+          const toDate = parseDate(filters.toDate);
+          
+          if (fromDate > toDate) {
+            throw new BadRequestException('From date must be before or equal to to date');
+          }
+          
+          recordsFilter.visitDate = {
+            $gte: new Date(fromDate.setHours(0, 0, 0, 0)),
+            $lte: new Date(toDate.setHours(23, 59, 59, 999))
+          };
+        }
+      }
+
+      let records = await this.healthRecordModel.find(recordsFilter)
+        .populate('patientId', 'name email mobileNo')
+        .populate('doctorId', 'name email')
+        .sort({ visitDate: -1 });
+
+      if (filters.patientName) {
+        records = records.filter(record => 
+          (record.patientId as any).name?.toLowerCase().includes(filters.patientName!.toLowerCase())
+        );
+      }
+
+      return records;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      console.error('Error fetching health records:', error);
+      throw new InternalServerErrorException('Failed to fetch health records');
     }
-
-    return records;
   }
 
   async getPatientHealthRecords(patientId: string, hospitalId: string) {
@@ -218,6 +268,55 @@ export class DoctorService {
       filter,
       { password: 0 }
     ).select('name email mobileNo createdAt');
+  }
+
+  async getHospitalPatientsDetails(hospitalId: string, filters: {
+    name?: string,
+    email?: string,
+    fromDate?: string,
+    toDate?: string
+  }) {
+    // Get all patients from the hospital
+    const query: any = { hospitalId, userType: 'patient' };
+    
+    if (filters.name) {
+      query.name = { $regex: filters.name, $options: 'i' };
+    }
+    if (filters.email) {
+      query.email = { $regex: filters.email, $options: 'i' };
+    }
+  
+    const patients = await this.userModel.find(query, { password: 0 });
+  
+    // Get health records for each patient
+    const patientDetails = await Promise.all(patients.map(async (patient) => {
+      const healthRecords = await this.healthRecordModel.find({
+        patientId: patient._id,
+        ...(filters.fromDate && { visitDate: { $gte: new Date(filters.fromDate) } }),
+        ...(filters.toDate && { visitDate: { $lte: new Date(filters.toDate) } })
+      }).populate('doctorId', 'name email');
+  
+      return {
+        patientId: patient._id,
+        name: patient.name,
+        email: patient.email,
+        mobileNo: patient.mobileNo,
+        age: patient.age,
+        gender: patient.gender,
+        healthRecords: healthRecords.map(record => ({
+          diagnosis: record.diagnosis,
+          prescription: record.prescription,
+          notes: record.notes,
+          visitDate: record.visitDate,
+          doctor: record.doctorId
+        }))
+      };
+    }));
+  
+    return {
+      message: 'Hospital patients details retrieved successfully',
+      data: patientDetails
+    };
   }
 
   async getAvailabilitySlot(slotId: string) {
