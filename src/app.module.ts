@@ -9,8 +9,7 @@ import { Appointment, AppointmentSchema } from './schemas/appointment.schema';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { PatientModule } from './patient/patient.module';
 import { PaymentModule } from './payment/payment.module';
-// Remove this line:
-// import { RedisModule } from '@liaoliaots/nestjs-redis';
+import { HospitalModule } from './hospital/hospital.module';
 
 @Module({
   imports: [
@@ -21,6 +20,7 @@ import { PaymentModule } from './payment/payment.module';
     MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/hospital-management'),
     AuthModule,
     PatientModule,  // Add this line
+    HospitalModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: HealthRecord.name, schema: HealthRecordSchema },

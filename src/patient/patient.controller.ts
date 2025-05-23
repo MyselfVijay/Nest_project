@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, UseInterceptors, UploadedFile, Headers, Header } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Express } from 'express';
 import { PatientService } from './patient.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RoleGuard } from '../auth/guards/role.guard';
@@ -34,6 +36,14 @@ export class PatientController {
     return this.patientService.findAll();
   }
 
+  @Get('export')
+  @UseGuards(JwtAuthGuard)
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header('Content-Disposition', 'attachment; filename=patients.xlsx')
+  async exportPatients(@Headers('hospital-id') hospitalId: string) {
+    return this.patientService.exportPatientsToSpreadsheet(hospitalId);
+  }
+
   // READ - Get patient by ID
   @Get(':id')
   @UseGuards(JwtAuthGuard)
@@ -57,5 +67,15 @@ export class PatientController {
   @Role('admin')
   async removePatient(@Param('id') id: string) {
     return this.patientService.remove(id);
+  }
+
+  @Post('upload')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadPatients(
+    @UploadedFile() file: Express.Multer.File,
+    @Headers('hospital-id') hospitalId: string
+  ) {
+    return this.patientService.uploadPatientsFromSpreadsheet(file, hospitalId);
   }
 }

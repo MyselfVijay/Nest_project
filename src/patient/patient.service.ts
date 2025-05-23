@@ -4,6 +4,10 @@ import { Model } from 'mongoose';
 import { Redis } from 'ioredis';
 import { MailerService } from '@nestjs-modules/mailer';
 import * as bcrypt from 'bcrypt';
+import * as xlsx from 'xlsx';
+import { validate } from 'class-validator';
+import { plainToClass } from 'class-transformer';
+import { PatientSpreadsheetData } from './dto/upload-patients.dto';
 
 @Injectable()
 export class PatientService {
@@ -252,5 +256,83 @@ export class PatientService {
       throw new NotFoundException('Patient not found');
     }
     return deletedPatient;
+  }
+
+  async uploadPatientsFromSpreadsheet(file: Express.Multer.File, hospitalId: string) {
+    try {
+      const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const data = xlsx.utils.sheet_to_json(worksheet);
+  
+      const results: {
+        success: any[];
+        errors: Array<{ row: any; errors: string[] }>;
+      } = {
+        success: [],
+        errors: []
+      };
+  
+      for (const row of data) {
+        try {
+          const patientData = plainToClass(PatientSpreadsheetData, row);
+          const errors = await validate(patientData);
+  
+          if (errors.length > 0) {
+            results.errors.push({
+              row: row,
+              errors: errors.map(err => Object.values(err.constraints || {})).flat()
+            });
+            continue;
+          }
+
+          // Type assertion for row object
+          const typedRow = row as { password?: string };
+          const password = typedRow.password || Math.random().toString(36).slice(-8);
+          const hashedPassword = await bcrypt.hash(password, 10);
+  
+          const patient = await this.create({
+            ...patientData,
+            hospitalId,
+            userType: 'patient',
+            password: hashedPassword
+          });
+  
+          // Only include the plain password in response if it was auto-generated
+          results.success.push({
+            ...patient.toObject(),
+            plainPassword: typedRow.password ? undefined : password
+          });
+        } catch (error) {
+          results.errors.push({
+            row: row,
+            errors: [error.message]
+          });
+        }
+      }
+  
+      return results;
+    } catch (error) {
+      throw new Error(`Failed to process spreadsheet: ${error.message}`);
+    }
+}
+
+  async exportPatientsToSpreadsheet(hospitalId: string) {
+    const patients = await this.userModel.find(
+      { hospitalId, userType: 'patient' },
+      { password: 0, __v: 0 }
+    );
+  
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.json_to_sheet(patients.map(p => ({
+      Name: p.name,
+      Email: p.email,
+      'Mobile Number': p.mobileNo,
+      Age: p.age || '',
+      Gender: p.gender || '',
+      'Created At': p.createdAt
+    })));
+  
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Patients');
+    return xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
   }
 }

@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, Matches, IsNotEmpty, IsDateString } from 'class-validator';
+import { IsEmail, IsString, MinLength, Matches, IsNotEmpty, IsDateString, IsEnum } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -43,4 +43,15 @@ export class CreatePatientDto {
     message: 'Invalid date format. Please use YYYY-MM-DD format (e.g., 1990-01-01)'
   })
   dob: string;
+
+  @ApiProperty({ 
+    example: 'male', 
+    description: 'Gender of the patient', 
+    enum: ['male', 'female', 'other'] 
+  })
+  @IsEnum(['male', 'female', 'other'], { 
+    message: 'Gender must be one of: male, female, other' 
+  })
+  @IsNotEmpty({ message: 'Gender cannot be empty' })
+  gender: string;
 }

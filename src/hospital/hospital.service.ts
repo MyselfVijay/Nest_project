@@ -30,6 +30,27 @@ export class HospitalService {
     }
   }
 
+  async createMultiple(hospitals: CreateHospitalDto[]) {
+    try {
+      const results: Hospital[] = [];
+      for (const hospital of hospitals) {
+        try {
+          const result = await this.create(hospital);
+          results.push(result);
+        } catch (error) {
+          if (error instanceof ConflictException) {
+            console.log(`Hospital ${hospital.hospitalId} already exists, skipping...`);
+            continue;
+          }
+          throw error;
+        }
+      }
+      return results;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async findAll() {
     return this.hospitalModel.find().exec();
   }

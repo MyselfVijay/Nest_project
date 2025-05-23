@@ -3,9 +3,15 @@ import Redis from 'ioredis';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
+  private static instance: Redis;
   private client: Redis;
 
   async onModuleInit() {
+    if (RedisService.instance) {
+      this.client = RedisService.instance;
+      return;
+    }
+
     const host = process.env.REDIS_HOST;
     const port = process.env.REDIS_PORT;
     const password = process.env.REDIS_PASSWORD;
@@ -64,6 +70,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       console.log('Redis connection ended');
     });
 
+    RedisService.instance = this.client;
+
     // Add connection health check
     setInterval(async () => {
       try {
@@ -78,7 +86,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    if (this.client) {
+    if (this.client && !RedisService.instance) {
       await this.client.quit();
     }
   }
