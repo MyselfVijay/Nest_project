@@ -11,7 +11,12 @@ import { RolesGuard } from './guards/roles.guard';
 import { Request as ExpressRequest } from 'express';
 import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 import { DoctorService } from '../doctor/doctor.service';
-import { Request } from '@nestjs/common';
+import { Roles } from './decorators/roles.decorator';
+import { RequestUser } from './interfaces/request-user.interface';
+
+interface RequestWithUser extends ExpressRequest {
+  user: RequestUser;
+}
 
 @Controller('auth/patients')
 export class PatientController {
@@ -98,18 +103,35 @@ export class PatientController {
   }
 
   @Get(':id')
-  async getPatient(@Param('id') id: string) {
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'doctor', 'patient')
+  async getPatient(
+    @Param('id') id: string,
+    @Req() req: RequestWithUser
+  ) {
     try {
+      if (!req.user) {
+        throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+      }
+
       if (!Types.ObjectId.isValid(id)) {
         throw new HttpException('Invalid patient ID', HttpStatus.BAD_REQUEST);
       }
 
-      const patient = await this.userModel.findOne({ _id: new Types.ObjectId(id), userType: 'patient' });
+      // If patient is accessing their own data, verify the ID matches
+      if (req.user.userType === 'patient' && req.user.sub !== id) {
+        throw new HttpException('Unauthorized access', HttpStatus.FORBIDDEN);
+      }
+
+      const patient = await this.userModel.findOne({ 
+        _id: new Types.ObjectId(id), 
+        userType: 'patient',
+        hospitalId: req.user.hospitalId // Ensure patient belongs to same hospital
+      });
       if (!patient) {
         throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
       }
 
-      // In the getPatient method response:
       return {
         message: 'Patient retrieved successfully',
         data: {
@@ -134,7 +156,12 @@ export class PatientController {
   }
 
   @Delete(':id')
-  async deletePatient(@Param('id') id: string) {
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'doctor')
+  async deletePatient(
+    @Param('id') id: string,
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+  ) {
     try {
       if (!Types.ObjectId.isValid(id)) {
         throw new HttpException('Invalid patient ID', HttpStatus.BAD_REQUEST);
@@ -142,7 +169,8 @@ export class PatientController {
 
       const patient = await this.userModel.findOneAndDelete({
         _id: new Types.ObjectId(id),
-        userType: 'patient'
+        userType: 'patient',
+        hospitalId: req.user.hospitalId // Ensure patient belongs to same hospital
       });
 
       if (!patient) {
@@ -150,12 +178,7 @@ export class PatientController {
       }
 
       return {
-        message: 'Patient deleted successfully',
-        data: {
-          userId: patient._id,
-          name: patient.name,
-          email: patient.email
-        }
+        message: 'Patient deleted successfully'
       };
     } catch (error) {
       if (error instanceof HttpException) {
@@ -166,10 +189,11 @@ export class PatientController {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
-  } // Add closing brace here
+  }
 
   @Get('health-records')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['patient']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('patient')
   async getMyHealthRecords(@Req() req: ExpressRequest & { user: { sub: string } }) {
     const patientId = req.user.sub;
     
@@ -184,11 +208,16 @@ export class PatientController {
   }
 
   @Post('appointments')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['patient']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('patient')
   async bookAppointment(
-    @Request() req,
+    @Req() req: RequestWithUser,
     @Body() bookingDto: { doctorId: string; appointmentTime: string }
   ) {
+    if (!req.user) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+
     const appointmentTime = new Date(bookingDto.appointmentTime);
     if (isNaN(appointmentTime.getTime())) {
       throw new HttpException('Invalid date format', HttpStatus.BAD_REQUEST);

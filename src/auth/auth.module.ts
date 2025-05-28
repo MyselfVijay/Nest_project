@@ -16,6 +16,8 @@ import { RedisService } from '../payment/redis.service';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { FacebookStrategy } from './strategies/facebook.strategy';
+import { RolesGuard } from './guards/roles.guard';
+import { UserController } from './user.controller';
 
 @Module({
   imports: [
@@ -36,8 +38,8 @@ import { FacebookStrategy } from './strategies/facebook.strategy';
     DoctorModule,
     MailerModule
   ],
-  controllers: [AuthController, PatientController, DoctorController],
-  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService, GoogleStrategy, FacebookStrategy],
-  exports: [AuthService]
+  controllers: [AuthController, PatientController, DoctorController, UserController],
+  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService, GoogleStrategy, FacebookStrategy, RolesGuard],
+  exports: [AuthService, RolesGuard]
 })
 export class AuthModule {}

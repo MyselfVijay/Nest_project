@@ -12,6 +12,7 @@ import { CreateHealthRecordDto } from '../patient/dto/create-health-record.dto';
 import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 import { Request as ExpressRequest } from 'express';
 import { DoctorService } from '../doctor/doctor.service';
+import { Roles } from './decorators/roles.decorator';
 
 @Controller('auth/doctors')
 export class DoctorController {
@@ -106,7 +107,8 @@ export class DoctorController {
   }
 
   @Get('patients')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
   async getPatientsList(@Request() req) {
     const hospitalId = req.user.hospitalId;
     
@@ -123,7 +125,8 @@ export class DoctorController {
   }
 
   @Get('hospital-patients')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
   async getHospitalPatients(
     @Request() req,
     @Query('name') name?: string,
@@ -141,7 +144,8 @@ export class DoctorController {
   }
 
   @Get('hospital-health-records')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
   async getHospitalHealthRecords(
     @Request() req,
     @Query() filters: {
@@ -163,7 +167,8 @@ export class DoctorController {
   }
 
   @Get('patients/health-records/:patientId')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
   async getPatientHealthRecords(
     @Param('patientId') patientId: string,
     @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
@@ -192,7 +197,8 @@ export class DoctorController {
   }
 
   @Post('patients/:patientId/health-records')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
   async createHealthRecord(
     @Param('patientId') patientId: string,
     @Body() createHealthRecordDto: CreateHealthRecordDto,
@@ -228,7 +234,8 @@ export class DoctorController {
   }
 
   @Get('available')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor', 'patient')
   async getAvailableDoctors(
     @Request() req,
     @Query('date') dateStr: string
@@ -247,9 +254,10 @@ export class DoctorController {
   }
 
   @Post('availability')
-  @UseGuards(JwtAuthGuard, new RolesGuard(['doctor']))
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('doctor')
   async setAvailability(
-    @Request() req,
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } },
     @Body() availabilityDto: { fromTime: string; toTime: string }
   ) {
     const fromTime = new Date(availabilityDto.fromTime);

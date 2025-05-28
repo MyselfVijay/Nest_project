@@ -10,17 +10,20 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from '@nestjs-modules/mailer';
 import * as crypto from 'crypto';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
   private readonly maxLoginAttempts = 5;
   private readonly loginLockDuration = 3600; // 1 hour in seconds
+  private tokenBlacklist: Set<string> = new Set();
 
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     private jwtService: JwtService,
     private redisService: RedisService,
-    private mailerService: MailerService
+    private mailerService: MailerService,
+    private configService: ConfigService
   ) {}
 
   private async checkLoginAttempts(email: string): Promise<void> {
@@ -288,5 +291,18 @@ export class AuthService {
       console.error('Social login error:', error);
       throw new UnauthorizedException('Failed to process social login');
     }
+  }
+
+  async invalidateToken(token: string): Promise<void> {
+    // Add token to blacklist
+    this.tokenBlacklist.add(token);
+  }
+
+  isTokenBlacklisted(token: string): boolean {
+    return this.tokenBlacklist.has(token);
+  }
+
+  async logout(token: string): Promise<void> {
+    await this.invalidateToken(token);
   }
 }

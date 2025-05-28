@@ -3,6 +3,9 @@ import { DoctorService } from './doctor.service';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Request as Req } from '@nestjs/common';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { ExpressRequest } from '../auth/interfaces/express-request.interface';
 
 @Controller('doctors')
 export class DoctorController {
@@ -18,11 +21,13 @@ export class DoctorController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   async deleteDoctor(
     @Param('id') id: string,
-    @Headers('hospital-id') hospitalId: string,
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
   ) {
-    return this.doctorService.remove(id, hospitalId);
+    return this.doctorService.remove(id, req.user.hospitalId);
   }
 
   @Post('appointments')

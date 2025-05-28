@@ -3,8 +3,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Express } from 'express';
 import { PatientService } from './patient.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RoleGuard } from '../auth/guards/role.guard';
-import { Role } from '../auth/decorators/role.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
@@ -30,8 +30,8 @@ export class PatientController {
 
   // READ - Get all patients (protected, admin only)
   @Get()
-  @UseGuards(JwtAuthGuard, RoleGuard)
-  @Role('admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   async getAllPatients() {
     return this.patientService.findAll();
   }
@@ -63,8 +63,8 @@ export class PatientController {
 
   // DELETE - Remove patient
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RoleGuard)
-  @Role('admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   async removePatient(@Param('id') id: string) {
     return this.patientService.remove(id);
   }

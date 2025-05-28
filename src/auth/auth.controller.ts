@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, UseGuards, Req, Res } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Req, Res, HttpException, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -7,6 +7,12 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { NotFoundException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Response } from 'express';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RequestUser } from './interfaces/request-user.interface';
+
+interface RequestWithUser extends Request {
+  user: RequestUser;
+}
 
 @ApiTags('auth')
 @Controller('auth')
@@ -91,6 +97,35 @@ export class AuthController {
         success: false,
         error: error.message
       };
+    }
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  async logout(@Req() req: RequestWithUser) {
+    try {
+      if (!req.user) {
+        throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+      }
+
+      // You can add token invalidation logic here if needed
+      // For example, adding the token to a blacklist or clearing session data
+
+      return {
+        message: 'Logged out successfully',
+        data: {
+          userId: req.user.sub,
+          userType: req.user.userType
+        }
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        'An error occurred during logout',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 }
