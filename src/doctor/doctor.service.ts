@@ -726,30 +726,31 @@ export class DoctorService {
       query.status = filters.status;
     }
 
+    // Add date filtering
     if (filters.fromDate || filters.toDate) {
       query.appointmentTime = {};
+      
       if (filters.fromDate) {
-        if (isNaN(filters.fromDate.getTime())) {
-          throw new BadRequestException('Invalid fromDate format');
-        }
-        query.appointmentTime.$gte = filters.fromDate;
+        const startOfDay = new Date(filters.fromDate);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        query.appointmentTime.$gte = startOfDay;
       }
+      
       if (filters.toDate) {
-        if (isNaN(filters.toDate.getTime())) {
-          throw new BadRequestException('Invalid toDate format');
-        }
-        query.appointmentTime.$lte = filters.toDate;
+        const endOfDay = new Date(filters.toDate);
+        endOfDay.setUTCHours(23, 59, 59, 999);
+        query.appointmentTime.$lte = endOfDay;
       }
     }
-  
-    const appointments = await this.appointmentModel.find(query)
+
+    const appointments = await this.appointmentModel
+      .find(query)
       .populate('doctorId', 'name email')
       .populate('patientId', 'name email')
-      .sort({ appointmentTime: 1 })
-      .lean();
+      .sort({ appointmentTime: 1 });
 
     return {
-      message: "Booked Appointments list retrieved successfully",
+      message: 'Booked Appointments list retrieved successfully',
       data: appointments
     };
   }

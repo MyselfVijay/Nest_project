@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, Matches, IsNotEmpty } from 'class-validator';
+import { IsEmail, IsString, MinLength, Matches, IsNotEmpty, IsEnum } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -28,6 +28,18 @@ export class CreateDoctorDto {
     message: 'Password must contain at least one uppercase letter, one lowercase letter, one number and one special character (@$!%*?&)'
   })
   password: string;
+
+  @ApiProperty({ 
+      example: 'male', 
+      description: 'Gender of the Doctor', 
+      enum: ['male', 'female', 'other'] 
+    })
+    @IsEnum(['male', 'female', 'other'], { 
+      message: 'Gender must be one of: male, female, other' 
+    })
+    @IsNotEmpty({ message: 'Gender cannot be empty' })
+    gender: string;
+
 
   @ApiProperty({ example: '9876543210', description: 'Valid 10-digit mobile number' })
   @IsString({ message: 'Mobile number must be text' })

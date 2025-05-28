@@ -13,6 +13,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { DoctorModule } from '../doctor/doctor.module';
 import { DoctorController } from './doctor.controller';
 import { RedisService } from '../payment/redis.service';
+import { MailerModule } from '@nestjs-modules/mailer';
+import { GoogleStrategy } from './strategies/google.strategy';
+import { FacebookStrategy } from './strategies/facebook.strategy';
 
 @Module({
   imports: [
@@ -30,10 +33,11 @@ import { RedisService } from '../payment/redis.service';
       }),
       inject: [ConfigService],
     }),
-    DoctorModule
+    DoctorModule,
+    MailerModule
   ],
   controllers: [AuthController, PatientController, DoctorController],
-  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService],
+  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService, GoogleStrategy, FacebookStrategy],
   exports: [AuthService]
 })
 export class AuthModule {}

@@ -142,9 +142,14 @@ export class PaymentService {
       await this.checkPaymentAttempts(userId);
 
       const options = {
-        amount: amount * 100,
+        amount: amount * 100, // Keep the amount conversion
         currency,
         receipt: `receipt_${Date.now()}_${userId}`,
+        notes: {
+          userId: userId,
+          orderTime: new Date().toISOString()
+        },
+        payment_capture: 1 // Auto capture the payment
       };
 
       const lockAcquired = await this.acquireLock(options.receipt);

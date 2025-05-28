@@ -8,6 +8,8 @@ import * as bcrypt from 'bcrypt';
 import { RedisService } from '../payment/redis.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { MailerService } from '@nestjs-modules/mailer';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
@@ -17,7 +19,8 @@ export class AuthService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     private jwtService: JwtService,
-    private redisService: RedisService
+    private redisService: RedisService,
+    private mailerService: MailerService
   ) {}
 
   private async checkLoginAttempts(email: string): Promise<void> {
@@ -167,14 +170,28 @@ export class AuthService {
     await this.redisService.set(`reset_otp:${email}`, otp, 600);
   
     // Send email with OTP
-    // TODO: Implement email sending logic
-  
-    return {
-      message: 'Password reset instructions sent to your email',
-      statusCode: 200
-    };
-}
-  
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: 'Password Reset OTP',
+        text: `Your OTP for password reset is: ${otp}\nThis OTP will expire in 10 minutes.`,
+        html: `
+          <h3>Password Reset OTP</h3>
+          <p>Your OTP for password reset is: <strong>${otp}</strong></p>
+          <p>This OTP will expire in 10 minutes.</p>
+        `
+      });
+
+      return {
+        message: 'Password reset instructions sent to your email',
+        statusCode: 200
+      };
+    } catch (error) {
+      // Delete OTP from Redis if email fails
+      await this.redisService.del(`reset_otp:${email}`);
+      throw new HttpException('Failed to send OTP email', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
     const { email, otp, newPassword } = resetPasswordDto;
     
@@ -182,6 +199,24 @@ export class AuthService {
     const storedOtp = await this.redisService.get(`reset_otp:${email}`);
     if (!storedOtp || storedOtp !== otp) {
       throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    // Find user and verify type
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Validate password strength
+    if (newPassword.length < 8 || 
+        !/[A-Z]/.test(newPassword) || 
+        !/[a-z]/.test(newPassword) || 
+        !/[0-9]/.test(newPassword) || 
+        !/[!@#$%^&*]/.test(newPassword)) {
+      throw new HttpException(
+        'Password must be at least 8 characters long and contain uppercase, lowercase, numbers and special characters',
+        HttpStatus.BAD_REQUEST
+      );
     }
   
     // Update password
@@ -196,7 +231,62 @@ export class AuthService {
   
     return {
       message: 'Password reset successful',
-      statusCode: 200
+      statusCode: 200,
+      userType: user.userType
     };
+  }
+
+  async socialLogin(user: any): Promise<{ accessToken: string; user: any }> {
+    if (!user) {
+      throw new UnauthorizedException('No user from social provider');
+    }
+
+    try {
+      // Check if user exists
+      let existingUser = await this.userModel.findOne({ email: user.email });
+
+      if (!existingUser) {
+        // Create new user if doesn't exist
+        const newUser = {
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          userType: 'patient', // default type for social login
+          password: crypto.randomBytes(32).toString('hex'), // random password
+          isEmailVerified: true, // since email is verified by social provider
+          hospitalId: 'HOSP001', // default hospital ID for social login
+          mobileNo: '0000000000', // default mobile number
+          createdAt: new Date(),
+          lastLogin: new Date()
+        };
+
+        existingUser = await this.userModel.create(newUser);
+      } else {
+        // Update last login
+        existingUser.lastLogin = new Date();
+        await existingUser.save();
+      }
+
+      // Generate JWT token
+      const payload = {
+        sub: existingUser._id,
+        email: existingUser.email,
+        userType: existingUser.userType,
+        hospitalId: existingUser.hospitalId
+      };
+
+      return {
+        accessToken: this.jwtService.sign(payload),
+        user: {
+          _id: existingUser._id,
+          email: existingUser.email,
+          name: existingUser.name,
+          userType: existingUser.userType,
+          hospitalId: existingUser.hospitalId
+        }
+      };
+    } catch (error) {
+      console.error('Social login error:', error);
+      throw new UnauthorizedException('Failed to process social login');
+    }
   }
 }
