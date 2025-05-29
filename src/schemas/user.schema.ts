@@ -4,7 +4,6 @@ import { Document, Types } from 'mongoose';
 export type UserDocument = User & Document;
 
 @Schema({ timestamps: true })
-@Schema()
 export class User {
   @Prop({ required: true })
   name: string;
@@ -12,13 +11,13 @@ export class User {
   @Prop({ required: true, unique: true })
   email: string;
 
-  @Prop({ required: true })
+  @Prop()
   password: string;
 
   @Prop({ required: true })
   mobileNo: string;
 
-  @Prop({ required: true })
+  @Prop()
   hospitalId: string;
 
   @Prop({ required: true, enum: ['doctor', 'patient'] })
@@ -44,5 +43,15 @@ export class User {
 
   @Prop()
   gender?: string;
+
+  @Prop()
+  identifier?: string;
+
+  @Prop({ enum: ['pending', 'active', 'inactive'], default: 'pending' })
+  status: string;
+
+  @Prop()
+  address?: string;
 }
+
 export const UserSchema = SchemaFactory.createForClass(User);

@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User, UserSchema } from '../schemas/user.schema';
 import { HealthRecord, HealthRecordSchema } from '../schemas/health-record.schema';
 import { AuthController } from './auth.controller';
@@ -18,28 +18,48 @@ import { GoogleStrategy } from './strategies/google.strategy';
 import { FacebookStrategy } from './strategies/facebook.strategy';
 import { RolesGuard } from './guards/roles.guard';
 import { UserController } from './user.controller';
+import { IdentifierAuthService } from './identifier-auth.service';
+import { IdentifierAuthController } from './identifier-auth.controller';
+import { Identifier, IdentifierSchema } from '../schemas/identifier.schema';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
-      { name: HealthRecord.name, schema: HealthRecordSchema }
+      { name: HealthRecord.name, schema: HealthRecordSchema },
+      { name: Identifier.name, schema: IdentifierSchema }
     ]),
     JwtModule.registerAsync({
+      imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
-        signOptions: { 
-          expiresIn: configService.get<string>('JWT_EXPIRATION') 
-        },
+        signOptions: { expiresIn: '1h' },
       }),
       inject: [ConfigService],
     }),
     DoctorModule,
-    MailerModule
+    MailerModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        transport: {
+          host: configService.get('SMTP_HOST'),
+          port: configService.get('SMTP_PORT'),
+          secure: false,
+          auth: {
+            user: configService.get('SMTP_USER'),
+            pass: configService.get('SMTP_PASS'),
+          },
+        },
+        defaults: {
+          from: configService.get('SMTP_FROM'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
   ],
-  controllers: [AuthController, PatientController, DoctorController, UserController],
-  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService, GoogleStrategy, FacebookStrategy, RolesGuard],
-  exports: [AuthService, RolesGuard]
+  controllers: [AuthController, PatientController, DoctorController, UserController, IdentifierAuthController],
+  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService, GoogleStrategy, FacebookStrategy, RolesGuard, IdentifierAuthService],
+  exports: [AuthService, RolesGuard, IdentifierAuthService, RedisService]
 })
 export class AuthModule {}
