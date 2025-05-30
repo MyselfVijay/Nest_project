@@ -58,7 +58,9 @@ export class AuthService {
 
   private async resetLoginAttempts(email: string): Promise<void> {
     const attemptsKey = `login_attempts:${email}`;
+    const lockedKey = `login_locked:${email}`;
     await this.redisService.del(attemptsKey);
+    await this.redisService.del(lockedKey);
   }
 
   private async getLoginAttempts(email: string): Promise<number> {
@@ -72,7 +74,22 @@ export class AuthService {
       // Check login attempts before processing
       await this.checkLoginAttempts(loginDto.email);
 
+      // Find user by email without status restriction first
       const user = await this.userModel.findOne({ email: loginDto.email });
+      
+      // Log user details for debugging
+      console.log('Login attempt:', {
+        email: loginDto.email,
+        foundUser: user ? {
+          email: user.email,
+          status: user.status,
+          userType: user.userType,
+          hospitalId: user.hospitalId,
+          hasPassword: !!user.password,
+          identifier: user.identifier
+        } : 'No user found'
+      });
+
       if (!user) {
         const attempts = await this.getLoginAttempts(loginDto.email);
         let message = 'Invalid credentials';
@@ -86,7 +103,24 @@ export class AuthService {
         throw new UnauthorizedException({ message, statusCode: 401 });
       }
 
+      // Log the password verification attempt
+      console.log('Attempting password verification:', {
+        email: user.email,
+        providedPassword: loginDto.password,
+        storedPasswordHash: user.password
+      });
+
+      // Verify password
       const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
+      
+      // Log password verification result
+      console.log('Password verification:', {
+        email: user.email,
+        isPasswordValid,
+        status: user.status,
+        hospitalId: user.hospitalId
+      });
+
       if (!isPasswordValid) {
         const attempts = await this.getLoginAttempts(loginDto.email);
         let message = 'Invalid credentials';
@@ -100,14 +134,44 @@ export class AuthService {
         throw new UnauthorizedException({ message, statusCode: 401 });
       }
 
+      // Handle hospital ID
+      let finalHospitalId = user.hospitalId;
+      
+      // If hospital ID is undefined and hospital code is provided, use the code
+      if (!finalHospitalId && loginDto.hospitalCode) {
+        finalHospitalId = loginDto.hospitalCode;
+        // Update user's hospital ID
+        user.hospitalId = finalHospitalId;
+        await user.save();
+      }
+      
+      // If still no hospital ID, use default
+      if (!finalHospitalId) {
+        finalHospitalId = 'HOSP001'; // Default hospital ID
+        user.hospitalId = finalHospitalId;
+        await user.save();
+      }
+
+      // Verify hospital code if provided
+      if (loginDto.hospitalCode && finalHospitalId !== loginDto.hospitalCode) {
+        throw new UnauthorizedException({
+          message: 'Invalid hospital code',
+          statusCode: 401
+        });
+      }
+
       // Reset attempts on successful login
       await this.resetLoginAttempts(loginDto.email);
+
+      // Update last login time
+      user.lastLogin = new Date();
+      await user.save();
 
       const payload = {
         sub: user._id.toString(),
         email: user.email,
         userType: user.userType,
-        hospitalId: user.hospitalId,
+        hospitalId: finalHospitalId,
         iat: Math.floor(Date.now() / 1000)
       };
 
@@ -120,10 +184,19 @@ export class AuthService {
           userId: user._id,
           email: user.email,
           userType: user.userType,
+          hospitalId: finalHospitalId,
           lastLogin: Date.now()
         }),
         86400 // 24 hours TTL
       );
+
+      // Log successful login
+      console.log('Login successful:', {
+        email: user.email,
+        status: user.status,
+        userType: user.userType,
+        hospitalId: finalHospitalId
+      });
 
       return {
         accessToken,
@@ -132,10 +205,15 @@ export class AuthService {
           name: user.name,
           email: user.email,
           userType: user.userType,
-          hospitalId: user.hospitalId
+          hospitalId: finalHospitalId,
+          status: user.status
         }
       };
     } catch (error) {
+      console.error('Login error:', {
+        error: error.message,
+        stack: error.stack
+      });
       if (error instanceof HttpException) {
         throw error;
       }

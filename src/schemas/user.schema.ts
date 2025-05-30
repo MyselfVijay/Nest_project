@@ -47,7 +47,7 @@ export class User {
   @Prop()
   identifier?: string;
 
-  @Prop({ enum: ['pending', 'active', 'inactive'], default: 'pending' })
+  @Prop({ enum: ['pending', 'active', 'inactive', 'registered'], default: 'pending' })
   status: string;
 
   @Prop()

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Logger, NotFoundException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -10,6 +10,7 @@ import { Identifier } from '../schemas/identifier.schema';
 import { MailerService } from '@nestjs-modules/mailer';
 import * as nodemailer from 'nodemailer';
 import { RedisService } from '../payment/redis.service';
+import * as bcrypt from 'bcrypt';
 
 interface OtpData {
   otp: string;
@@ -153,7 +154,7 @@ export class IdentifierAuthService {
           email,
           mobileNo: mobileNumber,
           status: 'pending',
-          userType: 'patient'
+          userType: 'patient' // Default to patient for bulk uploads
         };
 
         await this.identifierModel.create(identifierData);
@@ -182,13 +183,18 @@ export class IdentifierAuthService {
   }
 
   async generateOtp(identifier: string): Promise<{ message: string }> {
-    // Find identifier by identifier
-    const identifierData = await this.identifierModel.findOne({ identifier, status: 'pending' });
+    // Find identifier by identifier and check if it's already registered
+    const identifierData = await this.identifierModel.findOne({ 
+      identifier, 
+      status: { $in: ['pending', 'active'] } // Only allow pending or active identifiers
+    });
+    
     if (!identifierData) {
-      throw new NotFoundException('Identifier not found or already registered');
+      throw new NotFoundException('Identifier not found, already registered, or inactive');
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate a consistent 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString().padStart(6, '0');
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 10); // OTP valid for 10 minutes
 
@@ -227,7 +233,8 @@ export class IdentifierAuthService {
 
       const info = await this.mailerService.sendMail(mailOptions);
       
-      // Log the Ethereal preview URL
+      // Log the OTP for debugging (remove in production)
+      this.logger.log(`Generated OTP: ${otp}`);
       this.logger.log(`Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
       this.logger.log(`OTP sent successfully to ${identifierData.email}`);
       
@@ -250,13 +257,33 @@ export class IdentifierAuthService {
 
     const otpData: OtpData = JSON.parse(otpDataString);
     
-    if (otpData.otp !== otp) {
+    // Clean and normalize both OTPs for comparison
+    const normalizedStoredOtp = otpData.otp.trim();
+    const normalizedInputOtp = otp.trim();
+    
+    // Log for debugging
+    this.logger.log(`Stored OTP: ${normalizedStoredOtp}`);
+    this.logger.log(`Input OTP: ${normalizedInputOtp}`);
+    
+    if (normalizedStoredOtp !== normalizedInputOtp) {
+      this.logger.error(`OTP mismatch - Stored: ${normalizedStoredOtp}, Input: ${normalizedInputOtp}`);
       throw new UnauthorizedException('Invalid OTP');
     }
 
     if (new Date() > new Date(otpData.expiresAt)) {
       await this.redisService.del(redisKey);
       throw new UnauthorizedException('OTP has expired');
+    }
+
+    // Check if identifier is still valid
+    const identifierData = await this.identifierModel.findOne({ 
+      identifier, 
+      status: { $in: ['pending', 'active'] }
+    });
+
+    if (!identifierData) {
+      await this.redisService.del(redisKey);
+      throw new UnauthorizedException('Identifier is no longer valid');
     }
 
     const userData = otpData.data;
@@ -281,36 +308,137 @@ export class IdentifierAuthService {
         throw new UnauthorizedException('Invalid access token');
       }
 
+      // Find the identifier and check its current status
       const identifierData = await this.identifierModel.findOne({ 
         identifier: registerDto.identifier,
-        status: 'pending'
+        status: { $in: ['pending', 'active'] }
       });
 
       if (!identifierData) {
-        throw new UnauthorizedException('Identifier not found or already registered');
+        throw new UnauthorizedException('Identifier not found, already registered, or inactive');
       }
 
-      // Create new user from identifier data
+      // Validate user type
+      if (registerDto.userType === 'doctor') {
+        throw new BadRequestException('Doctors must register through the doctor registration endpoint');
+      }
+
+      // Hash the password
+      const hashedPassword = await bcrypt.hash(registerDto.password, 10);
+
+      // Create new user from identifier data and registration data
       const newUser = new this.userModel({
         identifier: identifierData.identifier,
         name: identifierData.name,
         email: identifierData.email,
         mobileNo: identifierData.mobileNo,
-        password: registerDto.password,
-        userType: identifierData.userType,
-        status: 'active'
+        password: hashedPassword, // Use hashed password
+        userType: registerDto.userType || 'patient',
+        status: 'registered',
+        dob: registerDto.dateOfBirth,
+        gender: registerDto.gender,
+        address: registerDto.address,
+        hospitalId: 'HOSP001' // Set default hospital ID
       });
 
-      // Update identifier status
-      identifierData.status = 'active';
-      await identifierData.save();
+      try {
+        // Save the user
+        const savedUser = await newUser.save();
 
-      return await newUser.save();
+        // Update identifier status to registered
+        await this.identifierModel.findOneAndUpdate(
+          { _id: identifierData._id },
+          { $set: { status: 'registered' } }
+        );
+
+        this.logger.log(`User registered successfully with identifier: ${identifierData.identifier}`);
+        this.logger.log(`Identifier status updated from ${identifierData.status} to registered`);
+
+        return savedUser;
+      } catch (error) {
+        // If user creation fails, ensure identifier status remains unchanged
+        this.logger.error(`Failed to create user: ${error.message}`);
+        throw new BadRequestException('Failed to complete registration. Please try again.');
+      }
     } catch (error) {
-      if (error instanceof UnauthorizedException) {
+      this.logger.error(`Registration failed: ${error.message}`);
+      if (error instanceof UnauthorizedException || error instanceof BadRequestException) {
         throw error;
       }
       throw new UnauthorizedException('Invalid access token');
+    }
+  }
+
+  async deleteIdentifier(identifier: string): Promise<{ message: string }> {
+    try {
+      // First check if the identifier exists
+      const identifierData = await this.identifierModel.findOne({ identifier });
+      
+      if (!identifierData) {
+        throw new NotFoundException('Identifier not found');
+      }
+
+      // Check if the identifier is already registered
+      if (identifierData.status === 'registered') {
+        throw new BadRequestException('Cannot delete a registered identifier');
+      }
+
+      // Delete the identifier
+      const deletedIdentifier = await this.identifierModel.findOneAndDelete({ 
+        identifier,
+        status: { $ne: 'registered' } // Only delete if not registered
+      });
+      
+      if (!deletedIdentifier) {
+        throw new NotFoundException('Identifier not found or cannot be deleted');
+      }
+
+      return {
+        message: 'Identifier deleted successfully'
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new HttpException(
+        'An error occurred while deleting the identifier',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  async deleteIdentifierById(id: string): Promise<{ message: string }> {
+    try {
+      // First check if the identifier exists
+      const identifierData = await this.identifierModel.findById(id);
+      
+      if (!identifierData) {
+        throw new NotFoundException('Identifier not found');
+      }
+
+      // Check if the identifier is already registered
+      if (identifierData.status === 'registered') {
+        throw new BadRequestException('Cannot delete a registered identifier');
+      }
+
+      // Delete the identifier
+      const deletedIdentifier = await this.identifierModel.findByIdAndDelete(id);
+      
+      if (!deletedIdentifier) {
+        throw new NotFoundException('Identifier not found or cannot be deleted');
+      }
+
+      return {
+        message: 'Identifier deleted successfully'
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new HttpException(
+        'An error occurred while deleting the identifier',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 } 

@@ -1,8 +1,11 @@
-import { Controller, Post, Body, UseInterceptors, UploadedFile, UseGuards, Headers } from '@nestjs/common';
+import { Controller, Post, Body, UseInterceptors, UploadedFile, UseGuards, Headers, Delete, Param, HttpException, HttpStatus } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { IdentifierAuthService } from './identifier-auth.service';
 import { IdentifierRegisterDto } from './dto/identifier-register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from './decorators/roles.decorator';
+import { Types } from 'mongoose';
 
 @Controller('auth/identifier')
 export class IdentifierAuthController {
@@ -35,5 +38,17 @@ export class IdentifierAuthController {
   ) {
     const accessToken = auth.split(' ')[1];
     return this.identifierAuthService.completeRegistration(registerDto, accessToken);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'doctor')
+  async deleteIdentifier(@Param('id') id: string) {
+    // Check if the id is a valid MongoDB ObjectId
+    if (Types.ObjectId.isValid(id)) {
+      return this.identifierAuthService.deleteIdentifierById(id);
+    }
+    // If not an ObjectId, treat it as an identifier value
+    return this.identifierAuthService.deleteIdentifier(id);
   }
 } 

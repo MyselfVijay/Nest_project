@@ -6,6 +6,7 @@ import { PatientController } from './patient.controller';
 import { PatientService } from './patient.service';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { ConfigService } from '@nestjs/config';
+import { RedisService } from '../payment/redis.service';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ConfigService } from '@nestjs/config';
     })
   ],
   controllers: [PatientController],
-  providers: [PatientService]
+  providers: [PatientService, RedisService],
+  exports: [PatientService]
 })
 export class PatientModule {}

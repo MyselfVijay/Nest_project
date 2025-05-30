@@ -15,10 +15,10 @@ export class Identifier extends Document {
   @Prop({ required: true })
   mobileNo: string;
 
-  @Prop({ enum: ['pending', 'active', 'inactive'], default: 'pending' })
+  @Prop({ enum: ['pending', 'active', 'inactive', 'registered'], default: 'pending' })
   status: string;
 
-  @Prop({ default: 'patient' })
+  @Prop({ enum: ['patient', 'user'], default: 'patient' })
   userType: string;
 
   @Prop()
