@@ -1,35 +1,63 @@
-import { Injectable, ExecutionContext, UnauthorizedException, Inject } from '@nestjs/common';
+import { Injectable, ExecutionContext, UnauthorizedException, Logger } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from '../auth.service';
 
+interface RouteInfo {
+  path: string;
+  method: string;
+}
+
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
-  constructor(@Inject(AuthService) private readonly authService: AuthService) {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+  public excludeRoutes: RouteInfo[] = [];
+
+  constructor(private readonly authService: AuthService) {
     super();
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // First, let the base AuthGuard handle the JWT authentication
-    const result = (await super.canActivate(context)) as boolean;
-    if (!result) {
-      return false; // Authentication failed by the strategy
-    }
-
     const request = context.switchToHttp().getRequest();
-    const token = this.extractTokenFromHeader(request);
+    
+    // Check if the route should be excluded
+    const shouldExclude = this.excludeRoutes.some(
+      route => 
+        request.path.includes(route.path) && 
+        request.method === route.method
+    );
 
-    if (!token) {
-       // This case should ideally be caught by the base AuthGuard, 
-       // but we keep a check here for safety.
-       throw new UnauthorizedException('No token provided');
+    if (shouldExclude) {
+      return true;
     }
 
-    // Now, check if the token is blacklisted
-    if (await this.authService.isTokenBlacklisted(token)) {
-      throw new UnauthorizedException('Token has been invalidated');
-    }
+    try {
+      // First, let the base AuthGuard handle the JWT authentication
+      const result = (await super.canActivate(context)) as boolean;
+      if (!result) {
+        return false; // Authentication failed by the strategy
+      }
 
-    return true; // Authentication successful and token is not blacklisted
+      const token = this.extractTokenFromHeader(request);
+
+      if (!token) {
+        throw new UnauthorizedException('No token provided');
+      }
+
+      // Check if the token is blacklisted
+      const isBlacklisted = await this.authService.isTokenBlacklisted(token);
+      if (isBlacklisted) {
+        this.logger.warn(`Blocked access attempt with blacklisted token`);
+        throw new UnauthorizedException('Token has been invalidated');
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.error(`Authentication error: ${error.message}`, error.stack);
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Authentication failed');
+    }
   }
 
   private extractTokenFromHeader(request: any): string | undefined {

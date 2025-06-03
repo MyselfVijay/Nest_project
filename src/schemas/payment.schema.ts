@@ -1,31 +1,39 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Schema as MongooseSchema } from 'mongoose';
+
+export type PaymentDocument = Payment & Document;
 
 @Schema({ timestamps: true })
-export class Payment extends Document {
-  @Prop({ required: true })
-  orderId: string;
-
-  @Prop({ required: true })
-  userId: string;
-
+export class Payment {
   @Prop({ required: true })
   amount: number;
 
-  @Prop({ default: 'INR' })
-  currency: string;
+  @Prop({ required: true })
+  paymentDate: Date;
 
-  @Prop({ enum: ['created', 'success', 'failed'], default: 'created' })
+  @Prop({ required: true, enum: ['pending', 'completed', 'failed', 'refunded'] })
   status: string;
 
-  @Prop({ type: Object })
-  paymentDetails: Record<string, any>;
+  @Prop({ required: true, enum: ['credit_card', 'debit_card', 'cash', 'online_transfer'] })
+  paymentMethod: string;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
+  patientId: MongooseSchema.Types.ObjectId;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
+  doctorId: MongooseSchema.Types.ObjectId;
+
+  @Prop({ required: true })
+  hospitalId: string;
 
   @Prop()
-  razorpayPaymentId: string;
+  description: string;
 
   @Prop()
-  razorpaySignature: string;
+  transactionId: string;
+
+  @Prop()
+  notes: string;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

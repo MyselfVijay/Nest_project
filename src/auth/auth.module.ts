@@ -10,8 +10,6 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PatientController } from './patient.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { DoctorModule } from '../doctor/doctor.module';
-import { DoctorController } from './doctor.controller';
 import { RedisService } from '../payment/redis.service';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { GoogleStrategy } from './strategies/google.strategy';
@@ -21,6 +19,8 @@ import { UserController } from './user.controller';
 import { IdentifierAuthService } from './identifier-auth.service';
 import { IdentifierAuthController } from './identifier-auth.controller';
 import { Identifier, IdentifierSchema } from '../schemas/identifier.schema';
+import { APP_GUARD } from '@nestjs/core';
+import { DoctorModule } from '../doctor/doctor.module';
 
 @Module({
   imports: [
@@ -38,7 +38,6 @@ import { Identifier, IdentifierSchema } from '../schemas/identifier.schema';
       }),
       inject: [ConfigService],
     }),
-    DoctorModule,
     MailerModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -57,9 +56,51 @@ import { Identifier, IdentifierSchema } from '../schemas/identifier.schema';
       }),
       inject: [ConfigService],
     }),
+    DoctorModule,
   ],
-  controllers: [AuthController, PatientController, DoctorController, UserController, IdentifierAuthController],
-  providers: [AuthService, JwtAuthGuard, JwtStrategy, RedisService, GoogleStrategy, FacebookStrategy, RolesGuard, IdentifierAuthService],
+  controllers: [AuthController, PatientController, UserController, IdentifierAuthController],
+  providers: [
+    AuthService,
+    {
+      provide: APP_GUARD,
+      useFactory: (authService: AuthService) => {
+        const guard = new JwtAuthGuard(authService);
+        guard.excludeRoutes = [
+          // Auth routes
+          { path: 'auth/login', method: 'POST' },
+          { path: 'auth/forgot-password', method: 'POST' },
+          { path: 'auth/reset-password', method: 'POST' },
+          { path: 'auth/google', method: 'GET' },
+          { path: 'auth/google/callback', method: 'GET' },
+          { path: 'auth/facebook', method: 'GET' },
+          { path: 'auth/facebook/callback', method: 'GET' },
+          { path: 'auth/send-otp', method: 'POST' },
+          { path: 'auth/verify-otp', method: 'POST' },
+          
+          // Public doctor routes
+          { path: 'auth/doctors/available', method: 'GET' },
+          { path: 'auth/doctors/slots/available', method: 'GET' },
+          
+          // Payment routes
+          { path: 'payment/create-order', method: 'POST' },
+          { path: 'payment/verify', method: 'POST' },
+          { path: 'payment/callback', method: 'POST' },
+          
+          // Public patient routes
+          { path: 'auth/patients/register', method: 'POST' },
+          { path: 'auth/patients/verify-email', method: 'POST' },
+        ];
+        return guard;
+      },
+      inject: [AuthService],
+    },
+    JwtStrategy,
+    RedisService,
+    GoogleStrategy,
+    FacebookStrategy,
+    RolesGuard,
+    IdentifierAuthService
+  ],
   exports: [AuthService, RolesGuard, IdentifierAuthService, RedisService]
 })
 export class AuthModule {}

@@ -16,7 +16,7 @@ import { ConfigService } from '@nestjs/config';
 export class AuthService {
   private readonly maxLoginAttempts = 5;
   private readonly loginLockDuration = 3600; // 1 hour in seconds
-  private tokenBlacklist: Set<string> = new Set();
+  private readonly tokenBlacklistPrefix = 'token_blacklist:';
 
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
@@ -92,12 +92,12 @@ export class AuthService {
 
       if (!user) {
         const attempts = await this.getLoginAttempts(loginDto.email);
-        let message = 'Invalid credentials';
+        let message = 'Invalid credentials - Please check your email and password carefully';
         
         if (attempts === 2 || attempts === 3) {
-          message = 'Please carefully check your username and password';
+          message = 'Invalid credentials - Please verify your email and password. Make sure caps lock is off';
         } else if (attempts === 4) {
-          message = 'Warning: One more failed attempt will lock your account';
+          message = 'Invalid credentials - Warning: One more failed attempt will lock your account for 1 hour';
         }
         
         throw new UnauthorizedException({ message, statusCode: 401 });
@@ -123,12 +123,12 @@ export class AuthService {
 
       if (!isPasswordValid) {
         const attempts = await this.getLoginAttempts(loginDto.email);
-        let message = 'Invalid credentials';
+        let message = 'Invalid credentials - Please check your email and password carefully';
         
         if (attempts === 2 || attempts === 3) {
-          message = 'Please carefully check your username and password';
+          message = 'Invalid credentials - Please verify your email and password. Make sure caps lock is off';
         } else if (attempts === 4) {
-          message = 'Warning: One more failed attempt will lock your account';
+          message = 'Invalid credentials - Warning: One more failed attempt will lock your account for 1 hour';
         }
         
         throw new UnauthorizedException({ message, statusCode: 401 });
@@ -246,9 +246,17 @@ export class AuthService {
   
     // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiryDate = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
     
-    // Store OTP in Redis with 10 minutes expiration
-    await this.redisService.set(`reset_otp:${email}`, otp, 600);
+    // Store OTP in Redis with metadata
+    const otpData = {
+      otp,
+      expiry: expiryDate.toISOString(),
+      purpose: 'password_reset',
+      userType: user.userType
+    };
+    
+    await this.redisService.set(`otp:${email}`, JSON.stringify(otpData), 600);
   
     // Send email with OTP
     try {
@@ -269,7 +277,7 @@ export class AuthService {
       };
     } catch (error) {
       // Delete OTP from Redis if email fails
-      await this.redisService.del(`reset_otp:${email}`);
+      await this.redisService.del(`otp:${email}`);
       throw new HttpException('Failed to send OTP email', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
@@ -277,9 +285,29 @@ export class AuthService {
     const { email, otp, newPassword } = resetPasswordDto;
     
     // Verify OTP
-    const storedOtp = await this.redisService.get(`reset_otp:${email}`);
-    if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('Invalid or expired OTP');
+    const storedOtpData = await this.redisService.get(`otp:${email}`);
+    if (!storedOtpData) {
+      throw new UnauthorizedException('OTP has expired. Please request a new one');
+    }
+
+    // Parse the stored OTP data
+    let otpData;
+    try {
+      otpData = JSON.parse(storedOtpData);
+    } catch (error) {
+      throw new UnauthorizedException('Invalid OTP format');
+    }
+
+    // Check if OTP matches and hasn't expired
+    if (!otpData.otp || otpData.otp !== otp) {
+      throw new UnauthorizedException('Invalid OTP. Please check and try again');
+    }
+
+    // Check if OTP has expired
+    const expiryDate = new Date(otpData.expiry);
+    if (new Date() > expiryDate) {
+      await this.redisService.del(`otp:${email}`);
+      throw new UnauthorizedException('OTP has expired. Please request a new one');
     }
 
     // Find user and verify type
@@ -308,7 +336,7 @@ export class AuthService {
     );
   
     // Clear OTP
-    await this.redisService.del(`reset_otp:${email}`);
+    await this.redisService.del(`otp:${email}`);
   
     return {
       message: 'Password reset successful',
@@ -372,12 +400,17 @@ export class AuthService {
   }
 
   async invalidateToken(token: string): Promise<void> {
-    // Add token to blacklist
-    this.tokenBlacklist.add(token);
+    const key = this.tokenBlacklistPrefix + token;
+    // Store token in Redis with expiration matching JWT expiration
+    const decoded = this.jwtService.decode(token) as any;
+    const expirationTime = decoded?.exp ? decoded.exp - Math.floor(Date.now() / 1000) : 3600; // Default 1 hour
+    await this.redisService.set(key, 'true', expirationTime);
   }
 
-  isTokenBlacklisted(token: string): boolean {
-    return this.tokenBlacklist.has(token);
+  async isTokenBlacklisted(token: string): Promise<boolean> {
+    const key = this.tokenBlacklistPrefix + token;
+    const isBlacklisted = await this.redisService.get(key);
+    return isBlacklisted === 'true';
   }
 
   async logout(token: string): Promise<void> {

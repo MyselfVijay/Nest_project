@@ -10,6 +10,11 @@ import { MailerModule } from '@nestjs-modules/mailer';
 import { PatientModule } from './patient/patient.module';
 import { PaymentModule } from './payment/payment.module';
 import { HospitalModule } from './hospital/hospital.module';
+import { TokenBlockModule } from './token/token-block.module';
+import { OtpModule } from './auth/otp.module';
+import { TokenBlockService } from './token/token-block.service';
+import { RedisService } from './payment/redis.service';
+import { DoctorModule } from './doctor/doctor.module';
 
 @Module({
   imports: [
@@ -19,8 +24,11 @@ import { HospitalModule } from './hospital/hospital.module';
     }),
     MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/hospital-management'),
     AuthModule,
-    PatientModule,  // Add this line
+    PatientModule,
     HospitalModule,
+    TokenBlockModule,
+    OtpModule,
+    DoctorModule,
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: HealthRecord.name, schema: HealthRecordSchema },
@@ -39,6 +47,11 @@ import { HospitalModule } from './hospital/hospital.module';
       }
     }),
     PaymentModule,
-  ]
+  ],
+  providers: [
+    TokenBlockService,
+    RedisService
+  ],
+  exports: [TokenBlockService, RedisService]
 })
 export class AppModule {}

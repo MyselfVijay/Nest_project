@@ -1,18 +1,19 @@
-import { IsString, IsNotEmpty, IsDateString } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString } from 'class-validator';
 
 export class CreateHealthRecordDto {
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Diagnosis is required' })
   diagnosis: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Prescription is required' })
   prescription: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Notes are required' })
   notes: string;
 
   @IsDateString()
-  visitDate: string;
+  @IsOptional()
+  visitDate?: string;
 }

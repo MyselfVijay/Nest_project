@@ -38,13 +38,29 @@ export class PatientController {
       // Check if user already exists
       const existingUser = await this.userModel.findOne({ email: createPatientDto.email });
       if (existingUser) {
+        // If user exists but doesn't have hospitalId, update it
+        if (!existingUser.hospitalId) {
+          existingUser.hospitalId = hospitalId;
+          await existingUser.save();
+          return {
+            message: 'Patient hospital updated successfully',
+            data: {
+              userId: existingUser._id,
+              name: existingUser.name,
+              email: existingUser.email,
+              mobileNo: existingUser.mobileNo,
+              userType: existingUser.userType,
+              hospitalId: existingUser.hospitalId
+            }
+          };
+        }
         throw new HttpException('Email already registered', HttpStatus.CONFLICT);
       }
 
       // Hash password
       const hashedPassword = await bcrypt.hash(createPatientDto.password, 10);
 
-      // In the register method, update the newPatient creation:
+      // Create new patient with all required fields
       const newPatient = new this.userModel({
         name: createPatientDto.name,
         email: createPatientDto.email.toLowerCase(),
@@ -54,7 +70,8 @@ export class PatientController {
         userType: 'patient',
         dob: new Date(createPatientDto.dob),
         createdAt: new Date(),
-        lastLogin: null
+        lastLogin: null,
+        status: 'active' // Set initial status as active
       });
 
       // Save patient
@@ -82,21 +99,57 @@ export class PatientController {
       };
     } catch (error) {
       console.error('Patient registration error:', error);
-
       if (error instanceof HttpException) {
         throw error;
       }
-
-      if (error.name === 'ValidationError') {
-        const validationError = error as { errors: { [key: string]: { message: string } } };
-        throw new HttpException({
-          message: 'Validation failed',
-          errors: Object.values(validationError.errors).map(err => err.message)
-        }, HttpStatus.BAD_REQUEST);
-      }
-
       throw new HttpException(
         'An error occurred while registering the patient',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Post('assign-hospital')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'doctor')
+  async assignHospital(
+    @Body() data: { patientId: string, hospitalId: string },
+    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string, userType: string } }
+  ) {
+    try {
+      // Verify the requesting user has permission
+      if (req.user.userType === 'doctor' && req.user.hospitalId !== data.hospitalId) {
+        throw new HttpException('You can only assign patients to your hospital', HttpStatus.FORBIDDEN);
+      }
+
+      const patient = await this.userModel.findOne({
+        _id: data.patientId,
+        userType: 'patient'
+      });
+
+      if (!patient) {
+        throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Update hospital assignment
+      patient.hospitalId = data.hospitalId;
+      await patient.save();
+
+      return {
+        message: 'Patient hospital assignment updated successfully',
+        data: {
+          userId: patient._id,
+          name: patient.name,
+          email: patient.email,
+          hospitalId: patient.hospitalId
+        }
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        'Error updating patient hospital assignment',
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, UseGuards, Req, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Req, Res, HttpException, HttpStatus, UnauthorizedException, Logger } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -6,7 +6,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { NotFoundException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RequestUser } from './interfaces/request-user.interface';
 
@@ -17,7 +17,11 @@ interface RequestWithUser extends Request {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  private readonly logger = new Logger(AuthController.name);
+
+  constructor(
+    private readonly authService: AuthService
+  ) {}
 
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
@@ -127,5 +131,36 @@ export class AuthController {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  @Post('test/invalidate-token')
+  @UseGuards(JwtAuthGuard)
+  async testInvalidateToken(@Req() req: Request) {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      throw new UnauthorizedException('No token provided');
+    }
+    
+    await this.authService.invalidateToken(token);
+    return {
+      message: 'Token has been invalidated',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  @Get('test/check-token')
+  @UseGuards(JwtAuthGuard)
+  async testCheckToken(@Req() req: Request) {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      throw new UnauthorizedException('No token provided');
+    }
+    
+    const isBlacklisted = await this.authService.isTokenBlacklisted(token);
+    return {
+      message: isBlacklisted ? 'Token is blacklisted' : 'Token is valid',
+      isBlacklisted,
+      timestamp: new Date().toISOString()
+    };
   }
 }

@@ -86,7 +86,7 @@ export class PatientService {
         throw new NotFoundException('User not found');
       }
 
-      const otp = Math.floor(1000 + Math.random() * 9000).toString();
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiryTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
       
       // Store OTP details in Redis

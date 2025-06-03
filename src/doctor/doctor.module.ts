@@ -6,6 +6,7 @@ import { User, UserSchema } from '../schemas/user.schema';
 import { HealthRecord, HealthRecordSchema } from '../schemas/health-record.schema';
 import { DoctorAvailability, DoctorAvailabilitySchema } from '../schemas/doctor-availability.schema';
 import { Appointment, AppointmentSchema } from '../schemas/appointment.schema';
+import { Payment, PaymentSchema } from '../schemas/payment.schema';
 
 @Module({
   imports: [
@@ -13,7 +14,8 @@ import { Appointment, AppointmentSchema } from '../schemas/appointment.schema';
       { name: User.name, schema: UserSchema },
       { name: HealthRecord.name, schema: HealthRecordSchema },
       { name: DoctorAvailability.name, schema: DoctorAvailabilitySchema },
-      { name: Appointment.name, schema: AppointmentSchema }
+      { name: Appointment.name, schema: AppointmentSchema },
+      { name: Payment.name, schema: PaymentSchema }
     ]),
   ],
   controllers: [DoctorController],

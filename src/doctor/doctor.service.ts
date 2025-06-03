@@ -8,6 +8,7 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import * as bcrypt from 'bcryptjs';
 import { DoctorAvailability, DoctorAvailabilityDocument } from '../schemas/doctor-availability.schema';
 import { Appointment, AppointmentDocument } from '../schemas/appointment.schema';
+import { Payment, PaymentDocument } from '../schemas/payment.schema';
 
 @Injectable()
 export class DoctorService {
@@ -15,7 +16,8 @@ export class DoctorService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
     @InjectModel(DoctorAvailability.name) private availabilityModel: Model<DoctorAvailabilityDocument>,
-    @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>
+    @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>,
+    @InjectModel(Payment.name) private paymentModel: Model<PaymentDocument>
   ) {}
 
   async create(createDoctorDto: CreateDoctorDto, hospitalId: string) {
@@ -252,22 +254,75 @@ export class DoctorService {
     email?: string,
     patientId?: string
   }) {
-    const filter: any = { hospitalId, userType: 'patient' };
-    
-    if (filters.name) {
-      filter.name = { $regex: filters.name, $options: 'i' };
-    }
-    if (filters.email) {
-      filter.email = { $regex: filters.email, $options: 'i' };
-    }
-    if (filters.patientId) {
-      filter._id = filters.patientId;
-    }
+    try {
+      console.log('Searching for patients with filters:', {
+        hospitalId,
+        filters
+      });
 
-    return this.userModel.find(
-      filter,
-      { password: 0 }
-    ).select('name email mobileNo createdAt');
+      const filter: any = { 
+        userType: 'patient',
+        status: 'active' // Only get active patients
+      };
+      
+      // If hospitalId is provided, add it to filter
+      if (hospitalId) {
+        filter.hospitalId = hospitalId;
+      }
+      
+      if (filters.name) {
+        filter.name = { $regex: filters.name, $options: 'i' };
+      }
+      if (filters.email) {
+        filter.email = { $regex: filters.email, $options: 'i' };
+      }
+      if (filters.patientId) {
+        // Log the patientId being searched
+        console.log('Searching for patient with ID:', filters.patientId);
+        filter._id = filters.patientId;
+      }
+
+      console.log('Using MongoDB filter:', JSON.stringify(filter, null, 2));
+
+      // First check if the patient exists at all
+      const patientExists = await this.userModel.findOne({ _id: filters.patientId });
+      console.log('Patient exists check:', {
+        exists: !!patientExists,
+        patientId: filters.patientId,
+        patientDetails: patientExists ? {
+          _id: patientExists._id,
+          name: patientExists.name,
+          hospitalId: patientExists.hospitalId,
+          userType: patientExists.userType,
+          status: patientExists.status
+        } : null
+      });
+
+      const patients = await this.userModel.find(
+        filter,
+        { password: 0 } // Exclude password
+      ).select('name email mobileNo createdAt hospitalId status');
+
+      console.log('Found patients:', {
+        count: patients.length,
+        patients: patients.map(p => ({
+          _id: p._id,
+          name: p.name,
+          hospitalId: p.hospitalId,
+          status: p.status
+        }))
+      });
+
+      return patients;
+    } catch (error) {
+      console.error('Error in getHospitalPatients:', {
+        error: error.message,
+        stack: error.stack,
+        hospitalId,
+        filters
+      });
+      throw error;
+    }
   }
 
   async getHospitalPatientsDetails(hospitalId: string, filters: {
@@ -690,68 +745,151 @@ export class DoctorService {
       }
       throw new InternalServerErrorException('Failed to book appointment: ' + error.message);
     }
-}
+  }
 
-  async getBookedAppointments(hospitalId: string, filters: {
-      doctorId?: string,
-      patientId?: string,
+  async getBookedAppointments(
+    doctorId: string,
+    hospitalId: string,
+    startDate: Date,
+    endDate: Date,
+    patientName?: string
+  ) {
+    try {
+      console.log('Fetching booked appointments with filters:', {
+        doctorId,
+        hospitalId,
+        startDate,
+        endDate,
+        patientName
+      });
+
+      // First get all appointments for the date range
+      const appointments = await this.appointmentModel
+        .find({
+          doctorId,
+          hospitalId,
+          appointmentTime: {
+            $gte: startDate,
+            $lte: endDate
+          },
+          status: 'scheduled'
+        })
+        .populate('patientId', 'name email mobileNo')
+        .populate('doctorId', 'name email')
+        .sort({ appointmentTime: 1 })
+        .lean();
+
+      // Filter by patient name if provided
+      let filteredAppointments = appointments;
+      if (patientName) {
+        const searchName = patientName.toLowerCase();
+        filteredAppointments = appointments.filter(appointment => 
+          (appointment.patientId as any).name.toLowerCase().includes(searchName)
+        );
+      }
+
+      console.log('Found appointments:', {
+        totalCount: appointments.length,
+        filteredCount: filteredAppointments.length,
+        doctorId,
+        hospitalId,
+        date: startDate.toISOString().split('T')[0],
+        patientName
+      });
+
+      return filteredAppointments.map(appointment => ({
+        _id: appointment._id,
+        appointmentTime: appointment.appointmentTime,
+        status: appointment.status,
+        patient: appointment.patientId,
+        doctor: appointment.doctorId,
+        hospitalId: appointment.hospitalId
+      }));
+    } catch (error) {
+      console.error('Error in getBookedAppointments:', {
+        error: error.message,
+        doctorId,
+        hospitalId,
+        startDate,
+        endDate,
+        patientName
+      });
+      throw error;
+    }
+  }
+
+  async getPatientPayments(
+    doctorId: string,
+    hospitalId: string,
+    filters: {
       fromDate?: Date,
       toDate?: Date,
-      status?: 'scheduled' | 'completed' | 'cancelled'
-  }) {
-    if (!hospitalId) {
-      throw new BadRequestException('Hospital ID is required');
+      patientId?: string
     }
+  ) {
+    try {
+      console.log('Fetching patient payments with filters:', {
+        doctorId,
+        hospitalId,
+        filters
+      });
 
-    const query: any = { hospitalId };
-    
-    if (filters.doctorId) {
-      if (!filters.doctorId.match(/^[0-9a-fA-F]{24}$/)) {
-        throw new BadRequestException('Invalid doctor ID format');
+      const query: any = {
+        hospitalId,
+        doctorId
+      };
+
+      // Add date range filter if provided
+      if (filters.fromDate || filters.toDate) {
+        query.paymentDate = {};
+        if (filters.fromDate) {
+          query.paymentDate.$gte = filters.fromDate;
+        }
+        if (filters.toDate) {
+          query.paymentDate.$lte = filters.toDate;
+        }
       }
-      query.doctorId = filters.doctorId;
+
+      // Add patient filter if provided
+      if (filters.patientId) {
+        query.patientId = filters.patientId;
+      }
+
+      const payments = await this.paymentModel
+        .find(query)
+        .populate('patientId', 'name email mobileNo')
+        .populate('doctorId', 'name email')
+        .sort({ paymentDate: -1 })
+        .lean();
+
+      console.log('Found payments:', {
+        count: payments.length,
+        doctorId,
+        hospitalId,
+        dateRange: filters.fromDate && filters.toDate ? 
+          `${filters.fromDate.toISOString()} to ${filters.toDate.toISOString()}` : 
+          'all time'
+      });
+
+      return payments.map(payment => ({
+        _id: payment._id,
+        amount: payment.amount,
+        paymentDate: payment.paymentDate,
+        status: payment.status,
+        paymentMethod: payment.paymentMethod,
+        patient: payment.patientId,
+        doctor: payment.doctorId,
+        hospitalId: payment.hospitalId,
+        description: payment.description
+      }));
+    } catch (error) {
+      console.error('Error in getPatientPayments:', {
+        error: error.message,
+        doctorId,
+        hospitalId,
+        filters
+      });
+      throw error;
     }
-
-    if (filters.patientId) {
-      if (!filters.patientId.match(/^[0-9a-fA-F]{24}$/)) {
-        throw new BadRequestException('Invalid patient ID format');
-      }
-      query.patientId = filters.patientId;
-    }
-
-    if (filters.status) {
-      if (!['scheduled', 'completed', 'cancelled'].includes(filters.status)) {
-        throw new BadRequestException('Invalid status value');
-      }
-      query.status = filters.status;
-    }
-
-    // Add date filtering
-    if (filters.fromDate || filters.toDate) {
-      query.appointmentTime = {};
-      
-      if (filters.fromDate) {
-        const startOfDay = new Date(filters.fromDate);
-        startOfDay.setUTCHours(0, 0, 0, 0);
-        query.appointmentTime.$gte = startOfDay;
-      }
-      
-      if (filters.toDate) {
-        const endOfDay = new Date(filters.toDate);
-        endOfDay.setUTCHours(23, 59, 59, 999);
-        query.appointmentTime.$lte = endOfDay;
-      }
-    }
-
-    const appointments = await this.appointmentModel
-      .find(query)
-      .populate('doctorId', 'name email')
-      .populate('patientId', 'name email')
-      .sort({ appointmentTime: 1 });
-
-    return {
-      message: 'Booked Appointments list retrieved successfully',
-      data: appointments
-    };
   }
 }
