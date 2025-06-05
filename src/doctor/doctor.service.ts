@@ -1,6 +1,6 @@
-import { Injectable, ConflictException, NotFoundException, BadRequestException, InternalServerErrorException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException, InternalServerErrorException, HttpException, HttpStatus, Inject, forwardRef, Logger } from '@nestjs/common';
 import { User, UserDocument } from '../schemas/user.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
@@ -9,15 +9,57 @@ import * as bcrypt from 'bcryptjs';
 import { DoctorAvailability, DoctorAvailabilityDocument } from '../schemas/doctor-availability.schema';
 import { Appointment, AppointmentDocument } from '../schemas/appointment.schema';
 import { Payment, PaymentDocument } from '../schemas/payment.schema';
+import { AuthService } from '../auth/auth.service';
+
+export interface PaginationOptions {
+  search?: string;
+  name?: string;
+  email?: string;
+  identifier?: string;
+  hospitalId?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface DuplicateInfo {
+  field: string;
+  value: string;
+  count: number;
+  users: Array<{
+    id: string;
+    name: string;
+    email: string;
+    hospitalId: string;
+  }>;
+}
+
+export interface HospitalPatientsResponse {
+  message: string;
+  data: {
+    patients: any[];
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    };
+    duplicateWarnings?: DuplicateInfo[];
+  };
+}
 
 @Injectable()
 export class DoctorService {
+  private readonly logger = new Logger(DoctorService.name);
+
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
     @InjectModel(DoctorAvailability.name) private availabilityModel: Model<DoctorAvailabilityDocument>,
     @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>,
-    @InjectModel(Payment.name) private paymentModel: Model<PaymentDocument>
+    @InjectModel(Payment.name) private paymentModel: Model<PaymentDocument>,
+    @Inject(forwardRef(() => AuthService)) private authService: AuthService
   ) {}
 
   async create(createDoctorDto: CreateDoctorDto, hospitalId: string) {
@@ -28,7 +70,7 @@ export class DoctorService {
       }
 
       // Check if email already exists
-      const existingUser = await this.userModel.findOne({ email: createDoctorDto.email });
+      const existingUser = await this.userModel.findOne({ email: createDoctorDto.email.toLowerCase() });
       if (existingUser) {
         throw new ConflictException('Email already exists');
       }
@@ -38,18 +80,33 @@ export class DoctorService {
         name: createDoctorDto.name,
         email: createDoctorDto.email.toLowerCase(),
         password: hashedPassword,
+        gender: createDoctorDto.gender,
+        mobileNo: createDoctorDto.mobileNo,
         userType: 'doctor',
         hospitalId,
+        specialization: createDoctorDto.specialization,
+        createdAt: new Date(),
+        lastLogin: null,
+        status: 'active',
+        dob: createDoctorDto.dob ? new Date(createDoctorDto.dob) : undefined
       });
 
-      await doctor.save();
+      const savedDoctor = await doctor.save();
+
       return {
-        message: 'Doctor signup successful',
+        message: 'Doctor registration successful',
         data: {
-          id: doctor._id,
-          name: doctor.name,
-          email: doctor.email,
-          mobileNo: doctor.mobileNo
+          id: savedDoctor._id,
+          name: savedDoctor.name,
+          email: savedDoctor.email,
+          gender: savedDoctor.gender,
+          mobileNo: savedDoctor.mobileNo,
+          userType: savedDoctor.userType,
+          hospitalId: savedDoctor.hospitalId,
+          createdAt: savedDoctor.createdAt,
+          lastLogin: savedDoctor.lastLogin,
+          status: savedDoctor.status,
+          dob: savedDoctor.dob
         }
       };
     } catch (error) {
@@ -249,80 +306,132 @@ export class DoctorService {
       .sort({ visitDate: -1 });
   }
 
-  async getHospitalPatients(hospitalId: string, filters: {
-    name?: string,
-    email?: string,
-    patientId?: string
-  }) {
-    try {
-      console.log('Searching for patients with filters:', {
-        hospitalId,
-        filters
-      });
+  async getHospitalPatients(hospitalId: string, options: PaginationOptions) {
+    const {
+      search,
+      name,
+      email,
+      identifier,
+      page = 1,
+      limit = 10,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = options;
 
-      const filter: any = { 
-        userType: 'patient',
-        status: 'active' // Only get active patients
-      };
-      
-      // If hospitalId is provided, add it to filter
-      if (hospitalId) {
-        filter.hospitalId = hospitalId;
-      }
-      
-      if (filters.name) {
-        filter.name = { $regex: filters.name, $options: 'i' };
-      }
-      if (filters.email) {
-        filter.email = { $regex: filters.email, $options: 'i' };
-      }
-      if (filters.patientId) {
-        // Log the patientId being searched
-        console.log('Searching for patient with ID:', filters.patientId);
-        filter._id = filters.patientId;
-      }
+    this.logger.debug(`Getting hospital patients with options:`, { hospitalId, ...options });
 
-      console.log('Using MongoDB filter:', JSON.stringify(filter, null, 2));
+    // Build base query
+    const query: any = { 
+      hospitalId,
+      userType: 'patient'
+    };
 
-      // First check if the patient exists at all
-      const patientExists = await this.userModel.findOne({ _id: filters.patientId });
-      console.log('Patient exists check:', {
-        exists: !!patientExists,
-        patientId: filters.patientId,
-        patientDetails: patientExists ? {
-          _id: patientExists._id,
-          name: patientExists.name,
-          hospitalId: patientExists.hospitalId,
-          userType: patientExists.userType,
-          status: patientExists.status
-        } : null
-      });
-
-      const patients = await this.userModel.find(
-        filter,
-        { password: 0 } // Exclude password
-      ).select('name email mobileNo createdAt hospitalId status');
-
-      console.log('Found patients:', {
-        count: patients.length,
-        patients: patients.map(p => ({
-          _id: p._id,
-          name: p.name,
-          hospitalId: p.hospitalId,
-          status: p.status
-        }))
-      });
-
-      return patients;
-    } catch (error) {
-      console.error('Error in getHospitalPatients:', {
-        error: error.message,
-        stack: error.stack,
-        hospitalId,
-        filters
-      });
-      throw error;
+    // Handle specific filters
+    if (name) {
+      query.name = { $regex: name, $options: 'i' };
     }
+    if (email) {
+      query.email = { $regex: `^${email.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, $options: 'i' };
+    }
+    if (identifier) {
+      query.identifier = { $regex: identifier, $options: 'i' };
+    }
+
+    // Handle general search across multiple fields
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { mobileNo: { $regex: search, $options: 'i' } },
+        { identifier: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    this.logger.debug('Final MongoDB query:', query);
+
+    // Calculate skip value for pagination
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    const total = await this.userModel.countDocuments(query);
+
+    // Execute query with pagination and sorting
+    const patients = await this.userModel
+      .find(query)
+      .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+      .skip(skip)
+      .limit(limit)
+      .select('-password') // Exclude password field
+      .exec();
+
+    this.logger.debug(`Found ${patients.length} patients matching criteria`);
+
+    // Check for duplicate information
+    const duplicates: DuplicateInfo[] = [];
+
+    // Check name duplicates
+    if (name || search) {
+      const searchValue = name || search;
+      if (searchValue) {
+        const nameMatches = await this.userModel.find({
+          name: { $regex: searchValue, $options: 'i' },
+          userType: 'patient'
+        }).select('_id name email hospitalId').lean().exec();
+
+        if (nameMatches.length > 1) {
+          duplicates.push({
+            field: 'name',
+            value: searchValue,
+            count: nameMatches.length,
+            users: nameMatches.map(user => ({
+              id: (user._id as Types.ObjectId).toString(),
+              name: user.name,
+              email: user.email,
+              hospitalId: user.hospitalId
+            }))
+          });
+        }
+      }
+    }
+
+    // Check email duplicates
+    if (email || search) {
+      const searchValue = email || search;
+      if (searchValue) {
+        const emailMatches = await this.userModel.find({
+          email: { $regex: searchValue, $options: 'i' },
+          userType: 'patient'
+        }).select('_id name email hospitalId').lean().exec();
+
+        if (emailMatches.length > 1) {
+          duplicates.push({
+            field: 'email',
+            value: searchValue,
+            count: emailMatches.length,
+            users: emailMatches.map(user => ({
+              id: (user._id as Types.ObjectId).toString(),
+              name: user.name,
+              email: user.email,
+              hospitalId: user.hospitalId
+            }))
+          });
+        }
+      }
+    }
+
+    return {
+      message: "Hospital patients retrieved successfully",
+      data: {
+        patients,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit)
+        },
+        duplicateWarnings: duplicates.length > 0 ? duplicates : undefined
+      }
+    };
   }
 
   async getHospitalPatientsDetails(hospitalId: string, filters: {
@@ -605,11 +714,18 @@ export class DoctorService {
     };
   }
 
-  async bookAppointment(doctorId: string, patientId: string, hospitalId: string, slotTime?: string, slotId?: string) {
+  async bookAppointment(
+    doctorId: string,
+    patientId: string,
+    hospitalId: string,
+    slotTime?: string,
+    slotId?: string,
+    date?: string
+  ) {
     try {
       // Input validation
       if (!doctorId || !patientId || !hospitalId || (!slotTime && !slotId)) {
-        throw new BadRequestException('Either slotTime or slotId is required');
+        throw new BadRequestException('Either slotTime with date or slotId is required');
       }
 
       // Validate MongoDB ObjectId format
@@ -620,10 +736,6 @@ export class DoctorService {
       if (slotId && !slotId.match(/^[0-9a-fA-F]{24}$/)) {
         throw new BadRequestException('Invalid slot ID format');
       }
-
-      // Get today's date at start of day in UTC
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
 
       let availability;
 
@@ -639,28 +751,40 @@ export class DoctorService {
         if (!availability) {
           throw new NotFoundException(`No available slot found with ID: ${slotId}`);
         }
-      } else if (slotTime) {
+      } else if (slotTime && date) {
+        // Parse the date
+        const appointmentDate = new Date(date);
+        if (isNaN(appointmentDate.getTime())) {
+          throw new BadRequestException('Invalid date format. Use YYYY-MM-DD');
+        }
+
+        // Set start and end of the specified date
+        const startOfDay = new Date(appointmentDate);
+        startOfDay.setUTCHours(0, 0, 0, 0);
+        
+        const endOfDay = new Date(appointmentDate);
+        endOfDay.setUTCHours(23, 59, 59, 999);
+
         // Validate slot time format (HH:MM-HH:MM)
         if (!slotTime.match(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]-([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
           throw new BadRequestException('Invalid slot time format. Use format HH:MM-HH:MM (e.g., 09:00-09:30)');
         }
 
-        // Find slot by time
+        // Find slot by time and date
         availability = await this.availabilityModel.findOne({
           doctorId,
           hospitalId,
           slotTime,
           isAvailable: true,
-          slotDate: { $gte: today }
-        }).sort({ slotDate: 1, fromTime: 1 });
+          fromTime: { $gte: startOfDay },
+          toTime: { $lte: endOfDay }
+        }).sort({ fromTime: 1 });
 
         if (!availability) {
-          throw new NotFoundException(`No available slot found for time: ${slotTime}`);
+          throw new NotFoundException(`No available slot found for time: ${slotTime} on date: ${date}`);
         }
-      }
-
-      if (!availability) {
-        throw new NotFoundException('No available slot found');
+      } else {
+        throw new BadRequestException('Either slotId OR both slotTime and date are required');
       }
 
       // Check if slot time is in the future
@@ -671,7 +795,7 @@ export class DoctorService {
       // Check for existing appointments
       const existingAppointment = await this.appointmentModel.findOne({
         doctorId,
-        appointmentTime: availability.fromTime,
+        appointmentDate: availability.fromTime,
         status: 'scheduled'
       });
 
@@ -682,7 +806,7 @@ export class DoctorService {
       // Check patient's existing appointments
       const patientExistingAppointment = await this.appointmentModel.findOne({
         patientId,
-        appointmentTime: availability.fromTime,
+        appointmentDate: availability.fromTime,
         status: 'scheduled'
       });
 
@@ -695,7 +819,8 @@ export class DoctorService {
         doctorId,
         patientId,
         hospitalId,
-        appointmentTime: availability.fromTime,
+        appointmentDate: availability.fromTime,
+        duration: 30, // Set default duration to 30 minutes
         status: 'scheduled'
       });
 
@@ -722,20 +847,19 @@ export class DoctorService {
         message: "Appointment booked successfully",
         data: {
           _id: savedAppointment._id,
+          patientId: savedAppointment.patientId,
+          doctorId: savedAppointment.doctorId,
+          appointmentDate: savedAppointment.appointmentDate,
+          status: savedAppointment.status,
+          duration: savedAppointment.duration,
           doctor: {
             _id: doctor._id,
             name: doctor.name,
-            email: doctor.email
-          },
-          patient: {
-            _id: patient._id,
-            name: patient.name,
-            email: patient.email
+            email: doctor.email,
+            specialization: doctor.specialization || 'Not specified'
           },
           hospitalId: savedAppointment.hospitalId,
-          slotTime: availability.slotTime,
-          appointmentTime: savedAppointment.appointmentTime,
-          status: savedAppointment.status
+          slotTime: availability.slotTime
         }
       };
     } catch (error) {
@@ -768,15 +892,15 @@ export class DoctorService {
         .find({
           doctorId,
           hospitalId,
-          appointmentTime: {
+          appointmentDate: {
             $gte: startDate,
             $lte: endDate
           },
-          status: 'scheduled'
+          status: { $in: ['scheduled', 'confirmed'] }
         })
         .populate('patientId', 'name email mobileNo')
         .populate('doctorId', 'name email')
-        .sort({ appointmentTime: 1 })
+        .sort({ appointmentDate: 1 })
         .lean();
 
       // Filter by patient name if provided
@@ -797,14 +921,19 @@ export class DoctorService {
         patientName
       });
 
-      return filteredAppointments.map(appointment => ({
+      const appointmentsList = filteredAppointments.map(appointment => ({
         _id: appointment._id,
-        appointmentTime: appointment.appointmentTime,
+        patientId: appointment.patientId,
+        doctorId: appointment.doctorId,
+        appointmentDate: appointment.appointmentDate,
         status: appointment.status,
         patient: appointment.patientId,
         doctor: appointment.doctorId,
-        hospitalId: appointment.hospitalId
+        hospitalId: appointment.hospitalId,
+        duration: appointment.duration
       }));
+
+      return appointmentsList;
     } catch (error) {
       console.error('Error in getBookedAppointments:', {
         error: error.message,
@@ -835,31 +964,23 @@ export class DoctorService {
       });
 
       const query: any = {
-        hospitalId,
-        doctorId
+        userId: filters.patientId // Changed from patientId to userId
       };
 
       // Add date range filter if provided
       if (filters.fromDate || filters.toDate) {
-        query.paymentDate = {};
+        query.createdAt = {}; // Changed from paymentDate to createdAt
         if (filters.fromDate) {
-          query.paymentDate.$gte = filters.fromDate;
+          query.createdAt.$gte = filters.fromDate;
         }
         if (filters.toDate) {
-          query.paymentDate.$lte = filters.toDate;
+          query.createdAt.$lte = filters.toDate;
         }
-      }
-
-      // Add patient filter if provided
-      if (filters.patientId) {
-        query.patientId = filters.patientId;
       }
 
       const payments = await this.paymentModel
         .find(query)
-        .populate('patientId', 'name email mobileNo')
-        .populate('doctorId', 'name email')
-        .sort({ paymentDate: -1 })
+        .sort({ createdAt: -1 }) // Changed from paymentDate to createdAt
         .lean();
 
       console.log('Found payments:', {
@@ -871,16 +992,16 @@ export class DoctorService {
           'all time'
       });
 
+      // Transform the payment data to match the expected format
       return payments.map(payment => ({
         _id: payment._id,
         amount: payment.amount,
-        paymentDate: payment.paymentDate,
+        createdAt: payment.createdAt,
         status: payment.status,
-        paymentMethod: payment.paymentMethod,
-        patient: payment.patientId,
-        doctor: payment.doctorId,
-        hospitalId: payment.hospitalId,
-        description: payment.description
+        currency: payment.currency,
+        orderId: payment.orderId,
+        userId: payment.userId,
+        paymentDetails: payment.paymentDetails
       }));
     } catch (error) {
       console.error('Error in getPatientPayments:', {

@@ -6,34 +6,32 @@ export type PaymentDocument = Payment & Document;
 @Schema({ timestamps: true })
 export class Payment {
   @Prop({ required: true })
+  orderId: string;
+
+  @Prop({ required: true })
+  userId: string;
+
+  @Prop({ required: true, min: 1 })
   amount: number;
 
-  @Prop({ required: true })
-  paymentDate: Date;
+  @Prop({ required: true, default: 'INR' })
+  currency: string;
 
-  @Prop({ required: true, enum: ['pending', 'completed', 'failed', 'refunded'] })
+  @Prop({ 
+    required: true, 
+    enum: ['created', 'authorized', 'captured', 'refunded', 'failed'],
+    default: 'created'
+  })
   status: string;
 
-  @Prop({ required: true, enum: ['credit_card', 'debit_card', 'cash', 'online_transfer'] })
-  paymentMethod: string;
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  paymentDetails: any;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
-  patientId: MongooseSchema.Types.ObjectId;
+  @Prop({ type: Date, default: Date.now })
+  createdAt: Date;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
-  doctorId: MongooseSchema.Types.ObjectId;
-
-  @Prop({ required: true })
-  hospitalId: string;
-
-  @Prop()
-  description: string;
-
-  @Prop()
-  transactionId: string;
-
-  @Prop()
-  notes: string;
+  @Prop({ type: Date, default: Date.now })
+  updatedAt: Date;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

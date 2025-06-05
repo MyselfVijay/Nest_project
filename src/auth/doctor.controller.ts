@@ -1,21 +1,23 @@
-import { Controller, Post, Body, HttpStatus, HttpException, Headers, InternalServerErrorException, Param, Req } from '@nestjs/common';
+import { Controller, Post, Body, HttpStatus, HttpException, Headers, InternalServerErrorException, Param, Req, Get, Query, UseGuards, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { User, UserDocument } from '../schemas/user.schema';
 import { CreateDoctorDto } from '../doctor/dto/create-doctor.dto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
-import { UseGuards, Get, Request, Query } from '@nestjs/common';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { CreateHealthRecordDto } from '../patient/dto/create-health-record.dto';
 import { HealthRecord, HealthRecordDocument } from '../schemas/health-record.schema';
 import { Request as ExpressRequest } from 'express';
-import { DoctorService } from '../doctor/doctor.service';
+import { DoctorService, PaginationOptions, HospitalPatientsResponse } from '../doctor/doctor.service';
 import { Roles } from './decorators/roles.decorator';
+import { GetUser } from './decorators/get-user.decorator';
 
 @Controller('auth/doctors')
 export class DoctorController {
+  private readonly logger = new Logger(DoctorController.name);
+
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(HealthRecord.name) private healthRecordModel: Model<HealthRecordDocument>,
@@ -109,8 +111,8 @@ export class DoctorController {
   @Get('patients')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
-  async getPatientsList(@Request() req) {
-    const hospitalId = req.user.hospitalId;
+  async getPatientsList(@GetUser() user: any) {
+    const hospitalId = user.hospitalId;
     
     // Fetch patients from the same hospital
     const patients = await this.userModel.find(
@@ -128,44 +130,41 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
   async getHospitalPatients(
-    @Request() req,
+    @GetUser() user: any,
+    @Query('search') search?: string,
     @Query('name') name?: string,
     @Query('email') email?: string,
-    @Query('patientId') patientId?: string
-  ) {
-    try {
-      console.log('Fetching hospital patients with filters:', {
-        hospitalId: req.user.hospitalId,
+    @Query('identifier') identifier?: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Query('sortBy') sortBy: string = 'createdAt',
+    @Query('sortOrder') sortOrder: 'asc' | 'desc' = 'desc'
+  ): Promise<HospitalPatientsResponse> {
+    this.logger.debug(`Getting hospital patients for doctor: ${user.email}, hospitalId: ${user.hospitalId}`);
+    
+    const result = await this.doctorService.getHospitalPatients(
+      user.hospitalId,
+      {
+        search,
         name,
         email,
-        patientId
-      });
+        identifier,
+        page,
+        limit,
+        sortBy,
+        sortOrder
+      }
+    );
 
-      const patients = await this.doctorService.getHospitalPatients(
-        req.user.hospitalId,
-        { name, email, patientId }
-      );
-
-      console.log('Found patients:', patients.length);
-
-      return {
-        message: "Hospital patient's list retrieved successfully",
-        data: patients
-      };
-    } catch (error) {
-      console.error('Error fetching hospital patients:', error);
-      throw new HttpException(
-        'Error retrieving hospital patients',
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
-    }
+    this.logger.debug(`Found ${result.data.patients.length} patients`);
+    return result;
   }
 
   @Get('hospital-health-records')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
   async getHospitalHealthRecords(
-    @Request() req,
+    @GetUser() user: any,
     @Query() filters: {
       patientName?: string,
       patientId?: string,
@@ -175,7 +174,7 @@ export class DoctorController {
     }
   ) {
     const records = await this.doctorService.getHospitalHealthRecords(
-      req.user.hospitalId,
+      user.hospitalId,
       filters
     );
     return {
@@ -189,9 +188,9 @@ export class DoctorController {
   @Roles('doctor')
   async getPatientHealthRecords(
     @Param('patientId') patientId: string,
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+    @GetUser() user: any
   ) {
-    const hospitalId = req.user.hospitalId;
+    const hospitalId = user.hospitalId;
     
     // Verify patient exists and belongs to same hospital
     const patient = await this.userModel.findOne({
@@ -220,11 +219,11 @@ export class DoctorController {
   async createHealthRecord(
     @Param('patientId') patientId: string,
     @Body() createHealthRecordDto: CreateHealthRecordDto,
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } }
+    @GetUser() user: any
   ) {
     try {
-      const doctorId = req.user.sub;
-      const hospitalId = req.user.hospitalId;
+      const doctorId = user.sub;
+      const hospitalId = user.hospitalId;
 
       console.log('Creating health record with:', {
         patientId,
@@ -281,7 +280,7 @@ export class DoctorController {
       console.error('Error creating health record:', {
         error: error.message,
         patientId,
-        hospitalId: req.user.hospitalId
+        hospitalId: user.hospitalId
       });
       
       if (error instanceof HttpException) {
@@ -299,12 +298,12 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor', 'patient')
   async getAvailableDoctors(
-    @Request() req,
+    @GetUser() user: any,
     @Query('date') dateStr: string
   ) {
     try {
       console.log('Getting available doctors:', {
-        hospitalId: req.user.hospitalId,
+        hospitalId: user.hospitalId,
         date: dateStr
       });
 
@@ -324,11 +323,11 @@ export class DoctorController {
         throw new HttpException('Cannot get availability for past dates', HttpStatus.BAD_REQUEST);
       }
 
-      const doctors = await this.doctorService.getAvailableDoctors(req.user.hospitalId, date);
+      const doctors = await this.doctorService.getAvailableDoctors(user.hospitalId, date);
       
       console.log('Found available doctors:', {
         count: doctors.data.length,
-        hospitalId: req.user.hospitalId,
+        hospitalId: user.hospitalId,
         date: dateStr
       });
 
@@ -339,7 +338,7 @@ export class DoctorController {
     } catch (error) {
       console.error('Error getting available doctors:', {
         error: error.message,
-        hospitalId: req.user.hospitalId,
+        hospitalId: user.hospitalId,
         date: dateStr
       });
 
@@ -358,7 +357,7 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
   async setAvailability(
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } },
+    @GetUser() user: any,
     @Body() availabilityDto: { fromTime: string; toTime: string }
   ) {
     const fromTime = new Date(availabilityDto.fromTime);
@@ -369,8 +368,8 @@ export class DoctorController {
     }
 
     const availability = await this.doctorService.setDoctorAvailability(
-      req.user.sub,
-      req.user.hospitalId,
+      user.sub,
+      user.hospitalId,
       fromTime,
       toTime
     );
@@ -385,7 +384,7 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('patient')
   async bookAppointmentAsPatient(
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } },
+    @GetUser() user: any,
     @Body() bookingDto: { 
       doctorId: string;
       slotTime?: string;
@@ -394,17 +393,17 @@ export class DoctorController {
   ) {
     try {
       console.log('Patient booking appointment:', {
-        patientId: req.user.sub,
+        patientId: user.sub,
         doctorId: bookingDto.doctorId,
-        hospitalId: req.user.hospitalId,
+        hospitalId: user.hospitalId,
         slotTime: bookingDto.slotTime,
         slotId: bookingDto.slotId
       });
 
       const appointment = await this.doctorService.bookAppointment(
         bookingDto.doctorId,
-        req.user.sub,
-        req.user.hospitalId,
+        user.sub,
+        user.hospitalId,
         bookingDto.slotTime,
         bookingDto.slotId
       );
@@ -429,7 +428,7 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
   async bookAppointmentAsDoctor(
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } },
+    @GetUser() user: any,
     @Body() bookingDto: { 
       patientId: string;
       slotTime?: string;
@@ -438,9 +437,9 @@ export class DoctorController {
   ) {
     try {
       console.log('Doctor booking appointment for patient:', {
-        doctorId: req.user.sub,
+        doctorId: user.sub,
         patientId: bookingDto.patientId,
-        hospitalId: req.user.hospitalId,
+        hospitalId: user.hospitalId,
         slotTime: bookingDto.slotTime,
         slotId: bookingDto.slotId
       });
@@ -448,7 +447,7 @@ export class DoctorController {
       // Verify patient belongs to same hospital
       const patient = await this.userModel.findOne({
         _id: bookingDto.patientId,
-        hospitalId: req.user.hospitalId,
+        hospitalId: user.hospitalId,
         userType: 'patient'
       });
 
@@ -457,9 +456,9 @@ export class DoctorController {
       }
 
       const appointment = await this.doctorService.bookAppointment(
-        req.user.sub,
+        user.sub,
         bookingDto.patientId,
-        req.user.hospitalId,
+        user.hospitalId,
         bookingDto.slotTime,
         bookingDto.slotId
       );
@@ -484,15 +483,15 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
   async getBookedAppointments(
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } },
+    @GetUser() user: any,
     @Query('date') dateStr: string,
     @Query('patientName') patientName?: string,
     @Query('hospitalId') hospitalId?: string
   ) {
     try {
       console.log('Getting booked appointments:', {
-        doctorId: req.user.sub,
-        hospitalId: hospitalId || req.user.hospitalId,
+        doctorId: user.sub,
+        hospitalId: hospitalId || user.hospitalId,
         date: dateStr,
         patientName
       });
@@ -515,10 +514,10 @@ export class DoctorController {
       endDate.setHours(23, 59, 59, 999);
 
       // Use provided hospitalId or fall back to user's hospitalId
-      const effectiveHospitalId = hospitalId || req.user.hospitalId;
+      const effectiveHospitalId = hospitalId || user.hospitalId;
 
       const appointments = await this.doctorService.getBookedAppointments(
-        req.user.sub,
+        user.sub,
         effectiveHospitalId,
         startDate,
         endDate,
@@ -527,7 +526,7 @@ export class DoctorController {
 
       console.log('Found booked appointments:', {
         count: appointments.length,
-        doctorId: req.user.sub,
+        doctorId: user.sub,
         hospitalId: effectiveHospitalId,
         date: dateStr,
         patientName
@@ -540,8 +539,8 @@ export class DoctorController {
     } catch (error) {
       console.error('Error getting booked appointments:', {
         error: error.message,
-        doctorId: req.user.sub,
-        hospitalId: hospitalId || req.user.hospitalId,
+        doctorId: user.sub,
+        hospitalId: hospitalId || user.hospitalId,
         date: dateStr,
         patientName
       });
@@ -561,23 +560,20 @@ export class DoctorController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('doctor')
   async getPatientPayments(
-    @Req() req: ExpressRequest & { user: { sub: string, hospitalId: string } },
+    @GetUser() user: any,
     @Query('hospitalId') hospitalId?: string,
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
     @Query('patientId') patientId?: string
   ) {
     try {
-      console.log('Getting patient payments:', {
-        doctorId: req.user.sub,
-        hospitalId: hospitalId || req.user.hospitalId,
+      this.logger.debug('Getting patient payments:', {
+        doctorId: user.sub,
+        hospitalId: hospitalId || user.hospitalId,
         fromDate,
         toDate,
         patientId
       });
-
-      // Use provided hospitalId or fall back to user's hospitalId
-      const effectiveHospitalId = hospitalId || req.user.hospitalId;
 
       // Parse dates if provided
       let startDate: Date | undefined;
@@ -600,8 +596,8 @@ export class DoctorController {
       }
 
       const payments = await this.doctorService.getPatientPayments(
-        req.user.sub,
-        effectiveHospitalId,
+        user.sub,
+        user.hospitalId,
         {
           fromDate: startDate,
           toDate: endDate,
@@ -609,11 +605,10 @@ export class DoctorController {
         }
       );
 
-      console.log('Found patient payments:', {
+      this.logger.debug('Found patient payments:', {
         count: payments.length,
-        doctorId: req.user.sub,
-        hospitalId: effectiveHospitalId,
-        dateRange: fromDate && toDate ? `${fromDate} to ${toDate}` : 'all time'
+        doctorId: user.sub,
+        hospitalId: user.hospitalId
       });
 
       return {
@@ -621,10 +616,10 @@ export class DoctorController {
         data: payments
       };
     } catch (error) {
-      console.error('Error getting patient payments:', {
+      this.logger.error('Error getting patient payments:', {
         error: error.message,
-        doctorId: req.user.sub,
-        hospitalId: hospitalId || req.user.hospitalId
+        doctorId: user.sub,
+        hospitalId: user.hospitalId
       });
 
       if (error instanceof HttpException) {

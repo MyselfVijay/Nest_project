@@ -22,9 +22,19 @@ export class TokenBlockFilter implements ExceptionFilter {
 
     this.logger.debug(`Processing ForbiddenException for path: ${request.path}`);
 
+    if (!token) {
+      response.status(403).json({
+        message: 'Forbidden resource',
+        error: 'Forbidden',
+        statusCode: 403,
+        path: request.path
+      });
+      return;
+    }
+
     // Check if token is already blocked
-    const blockStatus: BlockStatus = token ? await this.tokenBlockService.isTokenBlocked(token) : { blocked: false };
-    const retryCount = token ? await this.tokenBlockService.getRetryCount(token) : 0;
+    const blockStatus: BlockStatus = await this.tokenBlockService.isTokenBlocked(token);
+    const retryCount = await this.tokenBlockService.getRetryCount(token);
     const maxRetries = this.tokenBlockService.MAX_RETRIES;
 
     if (blockStatus.blocked && blockStatus.expiresAt) {
@@ -43,31 +53,55 @@ export class TokenBlockFilter implements ExceptionFilter {
           nextAllowedAttempt: blockStatus.expiresAt
         }
       });
-    } else {
-      // If token is not blocked, return warning message
-      this.logger.warn(`Unauthorized access attempt to path: ${request.path}`);
-      const remainingAttempts = maxRetries - retryCount;
+      return;
+    }
+
+    // Increment retry count and check if we should block
+    const remainingAttempts = maxRetries - retryCount;
+    
+    if (remainingAttempts <= 0) {
+      // Block the token
+      await this.tokenBlockService.blockToken(token, 'Multiple unauthorized access attempts');
+      const newBlockStatus = await this.tokenBlockService.isTokenBlocked(token);
       
       response.status(403).json({
-        message: 'Forbidden resource',
-        warning: remainingAttempts > 0 
-          ? `This resource cannot be accessed. ${remainingAttempts} more attempt(s) before temporary blocking.`
-          : 'This resource cannot be accessed. Next attempt will result in temporary token blocking.',
-        error: 'Forbidden',
+        message: 'Access temporarily blocked',
+        reason: 'Multiple unauthorized access attempts',
+        expiresAt: newBlockStatus.expiresAt,
         statusCode: 403,
         path: request.path,
         details: {
-          accessType: this.determineAccessType(request.path),
-          remainingAttempts,
-          nextBlockDuration: this.getNextBlockDuration(retryCount),
-          cooldownPeriod: '5 minutes',
-          resourceRestrictions: this.getResourceRestrictions(request.path)
+          blockDuration: '15 minutes',
+          remainingTime: this.calculateRemainingTime(newBlockStatus.expiresAt),
+          violationCount: retryCount + 1,
+          nextAllowedAttempt: newBlockStatus.expiresAt
         }
       });
+      return;
     }
+
+    // If not blocked yet, return warning message
+    this.logger.warn(`Unauthorized access attempt to path: ${request.path}`);
+    await this.tokenBlockService.blockToken(token, 'Unauthorized access attempt');
+    
+    response.status(403).json({
+      message: 'Forbidden resource',
+      warning: `This resource cannot be accessed. ${remainingAttempts} more attempt(s) before temporary blocking.`,
+      error: 'Forbidden',
+      statusCode: 403,
+      path: request.path,
+      details: {
+        accessType: this.determineAccessType(request.path),
+        remainingAttempts,
+        nextBlockDuration: this.getNextBlockDuration(retryCount),
+        cooldownPeriod: '5 minutes',
+        resourceRestrictions: this.getResourceRestrictions(request.path)
+      }
+    });
   }
 
-  private calculateRemainingTime(expiresAt: string): string {
+  private calculateRemainingTime(expiresAt: string | undefined): string {
+    if (!expiresAt) return '0 minutes';
     const now = new Date();
     const expiry = new Date(expiresAt);
     const diff = expiry.getTime() - now.getTime();

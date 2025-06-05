@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseInterceptors, UploadedFile, UseGuards, Headers, Delete, Param, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, UseInterceptors, UploadedFile, UseGuards, Headers, Delete, Param, HttpException, HttpStatus, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { IdentifierAuthService } from './identifier-auth.service';
 import { IdentifierRegisterDto } from './dto/identifier-register.dto';
@@ -13,12 +13,18 @@ export class IdentifierAuthController {
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
+  @UseGuards(JwtAuthGuard)
   async uploadIdentifierFile(@UploadedFile() file: Express.Multer.File) {
     return this.identifierAuthService.processIdentifierFile(file);
   }
 
   @Post('generate-otp')
-  async generateOtp(@Body('identifier') identifier: string) {
+  async generateOtp(
+    @Body('identifier') identifier: string
+  ) {
+    if (!identifier) {
+      throw new BadRequestException('Identifier is required');
+    }
     return this.identifierAuthService.generateOtp(identifier);
   }
 
@@ -27,6 +33,9 @@ export class IdentifierAuthController {
     @Body('identifier') identifier: string,
     @Body('otp') otp: string,
   ) {
+    if (!identifier || !otp) {
+      throw new BadRequestException('Identifier and OTP are required');
+    }
     return this.identifierAuthService.verifyOtp(identifier, otp);
   }
 
@@ -35,9 +44,13 @@ export class IdentifierAuthController {
   async completeRegistration(
     @Body() registerDto: IdentifierRegisterDto,
     @Headers('authorization') auth: string,
+    @Headers('hospital-id') hospitalId: string,
   ) {
+    if (!hospitalId) {
+      throw new BadRequestException('Hospital ID header is required');
+    }
     const accessToken = auth.split(' ')[1];
-    return this.identifierAuthService.completeRegistration(registerDto, accessToken);
+    return this.identifierAuthService.completeRegistration(registerDto, accessToken, hospitalId);
   }
 
   @Delete(':id')

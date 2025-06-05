@@ -1,6 +1,7 @@
 import { Injectable, ExecutionContext, UnauthorizedException, Logger } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from '../auth.service';
+import { Observable } from 'rxjs';
 
 interface RouteInfo {
   path: string;
@@ -11,6 +12,13 @@ interface RouteInfo {
 export class JwtAuthGuard extends AuthGuard('jwt') {
   private readonly logger = new Logger(JwtAuthGuard.name);
   public excludeRoutes: RouteInfo[] = [];
+  private excludedRoutes = [
+    '/auth/identifier/login',
+    '/auth/identifier/generate-otp',
+    '/auth/identifier/verify-otp',
+    '/auth/doctors/register',
+    '/auth/patients/register'
+  ];
 
   constructor(private readonly authService: AuthService) {
     super();
@@ -27,6 +35,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     );
 
     if (shouldExclude) {
+      return true;
+    }
+
+    const isExcluded = this.excludedRoutes.some(route => request.path.endsWith(route));
+    
+    if (isExcluded) {
       return true;
     }
 

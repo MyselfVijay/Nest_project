@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DoctorController } from './doctor.controller';
 import { DoctorService } from './doctor.service';
@@ -7,6 +7,8 @@ import { HealthRecord, HealthRecordSchema } from '../schemas/health-record.schem
 import { DoctorAvailability, DoctorAvailabilitySchema } from '../schemas/doctor-availability.schema';
 import { Appointment, AppointmentSchema } from '../schemas/appointment.schema';
 import { Payment, PaymentSchema } from '../schemas/payment.schema';
+import { AuthModule } from '../auth/auth.module';
+import { TokenBlockModule } from '../token/token-block.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { Payment, PaymentSchema } from '../schemas/payment.schema';
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Payment.name, schema: PaymentSchema }
     ]),
+    forwardRef(() => AuthModule),
+    TokenBlockModule
   ],
   controllers: [DoctorController],
   providers: [DoctorService],

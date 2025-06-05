@@ -36,7 +36,9 @@ export class PatientController {
       }
 
       // Check if user already exists
-      const existingUser = await this.userModel.findOne({ email: createPatientDto.email });
+      const existingUser = await this.userModel.findOne({ 
+        email: createPatientDto.email.toLowerCase() 
+      });
       if (existingUser) {
         // If user exists but doesn't have hospitalId, update it
         if (!existingUser.hospitalId) {
@@ -77,13 +79,6 @@ export class PatientController {
       // Save patient
       const savedPatient = await newPatient.save();
 
-      // Generate tokens
-      const tokens = await this.authService.generateTokens(
-        (savedPatient._id as Types.ObjectId).toString(),
-        savedPatient.hospitalId,
-        'patient'
-      );
-
       return {
         message: 'Patient registered successfully',
         data: {
@@ -94,7 +89,9 @@ export class PatientController {
           userType: savedPatient.userType,
           hospitalId: savedPatient.hospitalId,
           dob: createPatientDto.dob,
-          accessToken: tokens.accessToken
+          createdAt: savedPatient.createdAt,
+          lastLogin: savedPatient.lastLogin,
+          status: savedPatient.status
         }
       };
     } catch (error) {
@@ -265,14 +262,14 @@ export class PatientController {
   @Roles('patient')
   async bookAppointment(
     @Req() req: RequestWithUser,
-    @Body() bookingDto: { doctorId: string; appointmentTime: string }
+    @Body() bookingDto: { doctorId: string; appointmentDate: string }
   ) {
     if (!req.user) {
       throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
-    const appointmentTime = new Date(bookingDto.appointmentTime);
-    if (isNaN(appointmentTime.getTime())) {
+    const appointmentDate = new Date(bookingDto.appointmentDate);
+    if (isNaN(appointmentDate.getTime())) {
       throw new HttpException('Invalid date format', HttpStatus.BAD_REQUEST);
     }
 
@@ -280,7 +277,7 @@ export class PatientController {
       bookingDto.doctorId,
       req.user.sub,
       req.user.hospitalId,
-      appointmentTime.toISOString()
+      appointmentDate.toISOString()
     );
 
     return {

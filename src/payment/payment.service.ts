@@ -6,6 +6,21 @@ import * as crypto from 'crypto';
 import { RedisService } from './redis.service';
 import { Payment } from '../schemas/payment.schema';
 
+interface RazorpayOrderResponse {
+  id: string;
+  amount: number;
+  amount_due: number;
+  amount_paid: number;
+  attempts: number;
+  created_at: number;
+  currency: string;
+  entity: string;
+  notes: any[];
+  offer_id: string | null;
+  receipt: string;
+  status: string;
+}
+
 @Injectable()
 export class PaymentService {
   private readonly razorpay: Razorpay;
@@ -17,10 +32,24 @@ export class PaymentService {
     @InjectModel(Payment.name) private paymentModel: Model<Payment>,
     private readonly redisService: RedisService
   ) {
-    this.razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET,
-    });
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    
+    if (!keyId || !keySecret) {
+      console.error('Razorpay credentials are missing in environment variables');
+      throw new Error('Payment gateway configuration is missing');
+    }
+
+    try {
+      this.razorpay = new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+      });
+      console.log('Razorpay instance initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize Razorpay:', error);
+      throw new Error('Failed to initialize payment gateway');
+    }
   }
 
   private async checkPaymentAttempts(userId: string): Promise<void> {
@@ -106,96 +135,185 @@ export class PaymentService {
 
   async verifyPayment(orderId: string, paymentId: string, signature: string) {
     try {
+      console.log('Verifying payment:', { orderId, paymentId });
+
+      // Find the payment in our database
+      const payment = await this.paymentModel.findOne({ orderId });
+      if (!payment) {
+        throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Generate the expected signature
       const text = orderId + "|" + paymentId;
       const expectedSignature = crypto
         .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
         .update(text)
         .digest("hex");
 
+      // Verify signature
       const isValid = expectedSignature === signature;
-
       if (!isValid) {
-        return {
-          status: 400,
-          message: "Invalid payment signature"
-        };
+        console.error('Invalid signature:', {
+          expected: expectedSignature,
+          received: signature
+        });
+        throw new HttpException('Invalid payment signature', HttpStatus.BAD_REQUEST);
       }
 
-      await this.setPaymentState(orderId, 'verified', { paymentId, signature });
+      // Update payment status in database
+      payment.status = 'verified';
+      payment.paymentDetails = {
+        ...payment.paymentDetails,
+        paymentId,
+        signature,
+        verifiedAt: new Date()
+      };
+      payment.updatedAt = new Date();
+
+      await payment.save();
+      console.log('Payment verified successfully:', { orderId, paymentId });
 
       return {
-        status: 200,
-        message: "Payment verified successfully"
+        message: "Payment verified successfully",
+        data: {
+          orderId: payment.orderId,
+          status: payment.status,
+          amount: payment.amount,
+          currency: payment.currency
+        }
       };
     } catch (error) {
-      console.error('Payment verification error:', error);
-      return {
-        status: 500,
-        message: "Payment verification failed",
-        error: error.message
-      };
+      console.error('Payment verification error:', {
+        error: error.message,
+        orderId,
+        paymentId
+      });
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        'Payment verification failed',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 
   async createOrder(amount: number, userId: string, currency: string = 'INR') {
     try {
+      console.log('Starting order creation with:', { amount, userId, currency });
+      
+      if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+        console.error('Razorpay credentials are not configured');
+        throw new HttpException('Payment gateway configuration is missing', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
       await this.checkPaymentAttempts(userId);
+      console.log('Payment attempts check passed');
+
+      // Generate a very short receipt ID (max 40 chars)
+      const timestamp = Math.floor(Date.now() / 1000).toString(36); // Convert timestamp to base36
+      const userIdShort = userId.slice(-4); // Take last 4 chars of userId
+      const receipt = `r_${timestamp}_${userIdShort}`; // Format: r_<timestamp_base36>_<last4>
 
       const options = {
-        amount: amount * 100, // Keep the amount conversion
+        amount: amount * 100, // Amount in paise
         currency,
-        receipt: `receipt_${Date.now()}_${userId}`,
-        notes: {
-          userId: userId,
-          orderTime: new Date().toISOString()
-        },
-        payment_capture: 1 // Auto capture the payment
-      };
-
-      const lockAcquired = await this.acquireLock(options.receipt);
-      if (!lockAcquired) {
-        return {
-          status: 429,
-          message: 'Another payment request is in progress. Please try again later.'
-        };
-      }
+        receipt,
+        notes: [],
+        payment_capture: 1
+      } as any; // Type assertion to avoid Razorpay types issue
+      
+      console.log('Creating Razorpay order with options:', options);
 
       try {
-        const order = await this.razorpay.orders.create(options);
-        
-        // Create payment document in MongoDB
+        const order = await this.razorpay.orders.create(options) as unknown as RazorpayOrderResponse;
+        console.log('Razorpay order created successfully:', { orderId: order.id });
+
+        // Save the order in our database with the exact format needed
         const payment = new this.paymentModel({
           orderId: order.id,
-          userId,
+          userId: userId,
           amount: amount,
-          currency,
+          currency: currency,
           status: 'created',
-          paymentDetails: order
+          paymentDetails: {
+            amount: order.amount,
+            amount_due: order.amount_due,
+            amount_paid: order.amount_paid,
+            attempts: order.attempts,
+            created_at: order.created_at,
+            currency: order.currency,
+            entity: order.entity,
+            id: order.id,
+            notes: order.notes || [],
+            offer_id: order.offer_id,
+            receipt: order.receipt,
+            status: order.status
+          },
+          createdAt: new Date(),
+          updatedAt: new Date()
         });
-        await payment.save();
-        
-        await this.setPaymentState(order.id, 'created', { ...order, userId, amount });
 
+        const savedPayment = await payment.save();
+        console.log('Payment record saved to database:', { paymentId: savedPayment._id });
+
+        // Return the exact format requested
         return {
-          status: 200,
-          message: 'Order created successfully',
-          data: order
+          _id: savedPayment._id,
+          orderId: savedPayment.orderId,
+          userId: savedPayment.userId,
+          amount: savedPayment.amount,
+          currency: savedPayment.currency,
+          status: savedPayment.status,
+          paymentDetails: savedPayment.paymentDetails,
+          createdAt: savedPayment.createdAt,
+          updatedAt: savedPayment.updatedAt,
+          __v: savedPayment.__v
         };
-      } finally {
-        await this.releaseLock(options.receipt);
+      } catch (razorpayError: any) {
+        console.error('Razorpay API Error:', {
+          error: razorpayError.error,
+          stack: razorpayError.stack,
+          statusCode: razorpayError.statusCode,
+          error_description: razorpayError.description
+        });
+
+        // Throw appropriate HTTP exception based on the error
+        if (razorpayError.statusCode === 400) {
+          throw new HttpException(
+            razorpayError.error?.description || 'Invalid payment request',
+            HttpStatus.BAD_REQUEST
+          );
+        }
+        throw new HttpException(
+          'Failed to create payment order',
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
       }
     } catch (error) {
+      console.error('Detailed payment creation error:', {
+        error: error.message,
+        stack: error.stack,
+        userId,
+        amount,
+        currency,
+        errorType: error.constructor.name
+      });
+
+      // If it's already an HTTP exception, rethrow it
       if (error instanceof HttpException) {
         throw error;
       }
-      console.error('Razorpay order creation error:', error);
-      return {
-        status: 500,
-        message: 'Failed to create order',
-        error: error.message
-      };
+
+      // Otherwise, throw a generic 500 error
+      throw new HttpException(
+        'Failed to create payment order',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
-}
+  }
 
   async handlePaymentSuccess(paymentEntity: any) {
     try {

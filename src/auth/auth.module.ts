@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -56,7 +56,7 @@ import { DoctorModule } from '../doctor/doctor.module';
       }),
       inject: [ConfigService],
     }),
-    DoctorModule,
+    forwardRef(() => DoctorModule),
   ],
   controllers: [AuthController, PatientController, UserController, IdentifierAuthController],
   providers: [
@@ -76,8 +76,14 @@ import { DoctorModule } from '../doctor/doctor.module';
           { path: 'auth/facebook/callback', method: 'GET' },
           { path: 'auth/send-otp', method: 'POST' },
           { path: 'auth/verify-otp', method: 'POST' },
+          { path: 'auth/update-details', method: 'POST' },
+          
+          // Identifier auth routes
+          { path: 'auth/identifier/generate-otp', method: 'POST' },
+          { path: 'auth/identifier/verify-otp', method: 'POST' },
           
           // Public doctor routes
+          { path: 'auth/doctors/register', method: 'POST' },
           { path: 'auth/doctors/available', method: 'GET' },
           { path: 'auth/doctors/slots/available', method: 'GET' },
           

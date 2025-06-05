@@ -153,9 +153,10 @@ export class OtpController {
     @Body() updateDetailsDto: {
       email: string;
       otp: string;
+      updateFields?: Partial<UpdateFields>; // Make updateFields optional in DTO
     }
   ) {
-    const { email, otp } = updateDetailsDto;
+    const { email, otp, updateFields } = updateDetailsDto;
 
     // Verify OTP
     const storedOtpData = await this.verifyOtp(email, otp);
@@ -163,19 +164,22 @@ export class OtpController {
       throw new BadRequestException('Invalid or expired OTP');
     }
 
-    if (!storedOtpData.updateFields || Object.keys(storedOtpData.updateFields).length === 0) {
+    // Use either the stored update fields or the ones provided in the request
+    const fieldsToUpdate = updateFields || storedOtpData.updateFields;
+
+    if (!fieldsToUpdate || Object.keys(fieldsToUpdate).length === 0) {
       throw new BadRequestException('No fields specified for update');
     }
 
     // Update user details using the stored userType
-    await this.updateUserDetails(email, storedOtpData.updateFields, storedOtpData.userType);
+    await this.updateUserDetails(email, fieldsToUpdate, storedOtpData.userType);
 
     // Clear OTP from Redis
     await this.clearOtp(email);
 
     return {
       message: 'Details updated successfully',
-      updatedFields: Object.keys(storedOtpData.updateFields)
+      updatedFields: Object.keys(fieldsToUpdate)
     };
   }
 

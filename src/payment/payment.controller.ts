@@ -1,6 +1,7 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Headers } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Headers, UsePipes, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { PaymentService } from './payment.service';
-import { CreateOrderDto, VerifyPaymentDto } from './dto/payment.dto';
+import { VerifyPaymentDto } from './dto/verify-payment.dto';
+import { CreateOrderDto } from './dto/payment.dto';
 import crypto from 'crypto';
 
 @Controller('payment')
@@ -9,22 +10,45 @@ export class PaymentController {
 
   @Post('create-order')
   @HttpCode(HttpStatus.CREATED)
+  @UsePipes(new ValidationPipe({ transform: true }))
   async createOrder(@Body() createOrderDto: CreateOrderDto) {
     return this.paymentService.createOrder(
       createOrderDto.amount,
-      createOrderDto.userId, // Add userId parameter
-      createOrderDto.currency || 'INR' // Provide default value for currency
+      createOrderDto.userId,
+      createOrderDto.currency || 'INR'
     );
   }
 
   @Post('verify')
   @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    enableDebugMessages: true
+  }))
   async verifyPayment(@Body() verifyPaymentDto: VerifyPaymentDto) {
-    return this.paymentService.verifyPayment(
-      verifyPaymentDto.orderId,
-      verifyPaymentDto.paymentId,
-      verifyPaymentDto.signature
-    );
+    try {
+      console.log('Received verification request:', verifyPaymentDto);
+
+      if (!verifyPaymentDto.orderId || !verifyPaymentDto.paymentId || !verifyPaymentDto.signature) {
+        throw new BadRequestException('Missing required fields');
+      }
+
+      const result = await this.paymentService.verifyPayment(
+        verifyPaymentDto.orderId,
+        verifyPaymentDto.paymentId,
+        verifyPaymentDto.signature
+      );
+
+      return result;
+    } catch (error) {
+      console.error('Payment verification error:', error);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(error.message || 'Invalid payment verification request');
+    }
   }
 
   @Post('webhook')

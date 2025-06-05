@@ -301,7 +301,11 @@ export class IdentifierAuthService {
     };
   }
 
-  async completeRegistration(registerDto: IdentifierRegisterDto, accessToken: string): Promise<User> {
+  async completeRegistration(
+    registerDto: IdentifierRegisterDto,
+    accessToken: string,
+    hospitalId: string,
+  ) {
     try {
       const payload = this.jwtService.verify(accessToken);
       if (payload.identifier !== registerDto.identifier) {
@@ -338,7 +342,7 @@ export class IdentifierAuthService {
         dob: registerDto.dateOfBirth,
         gender: registerDto.gender,
         address: registerDto.address,
-        hospitalId: 'HOSP001' // Set default hospital ID
+        hospitalId,
       });
 
       try {
@@ -353,6 +357,12 @@ export class IdentifierAuthService {
 
         this.logger.log(`User registered successfully with identifier: ${identifierData.identifier}`);
         this.logger.log(`Identifier status updated from ${identifierData.status} to registered`);
+
+        // Add hospitalId to the user data
+        const userData = {
+          ...registerDto,
+          hospitalId,
+        };
 
         return savedUser;
       } catch (error) {

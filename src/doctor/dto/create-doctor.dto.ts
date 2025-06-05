@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, Matches, IsNotEmpty, IsEnum } from 'class-validator';
+import { IsEmail, IsString, MinLength, Matches, IsNotEmpty, IsEnum, IsDateString, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -48,4 +48,19 @@ export class CreateDoctorDto {
     message: 'Mobile number must be a valid 10-digit number starting with 6-9'
   })
   mobileNo: string;
+
+  @ApiProperty({ 
+    example: '1990-01-01', 
+    description: 'Date of Birth in YYYY-MM-DD format',
+    required: false
+  })
+  @IsOptional()
+  @IsDateString({}, { 
+    message: 'Date of Birth must be a valid date in YYYY-MM-DD format' 
+  })
+  dob?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  specialization: string;
 }
